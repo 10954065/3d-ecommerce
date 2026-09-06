@@ -22,11 +22,16 @@ export default async function AdminThreeDStudioPage() {
 
   return (
     <div className="flex flex-col gap-8">
-      <div>
-        <h1 className="font-display text-2xl">3D Asset Studio</h1>
-        <p className="text-sm text-muted-foreground">
-          Every garment asset in the catalog, its readiness, and a live preview before publishing.
-        </p>
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h1 className="font-display text-2xl">3D Asset Studio</h1>
+          <p className="text-sm text-muted-foreground">
+            Every garment asset in the catalog, its readiness, and a live preview before publishing.
+          </p>
+        </div>
+        <Link href="/admin/3d-studio/mannequin-preview" className="whitespace-nowrap text-sm underline underline-offset-4 hover:no-underline">
+          Mannequin engine preview (Phase 1 QA) &rarr;
+        </Link>
       </div>
 
       <section className="overflow-x-auto rounded-xl border border-border bg-card">

@@ -3,37 +3,20 @@
 import { Suspense, useRef } from "react";
 import { Canvas, useFrame } from "@react-three/fiber";
 import { Environment } from "@react-three/drei";
-import type { Group } from "three";
-import { MannequinFigure, type MannequinFigureHandle } from "./scene/MannequinFigure";
+import { Mannequin, DEFAULT_FEMALE_MEASUREMENTS, type MannequinHandle } from "./mannequin";
 import { useReducedMotion } from "./hooks/useReducedMotion";
-import type { MannequinMeasurements } from "./types";
-
-const HERO_MEASUREMENTS: MannequinMeasurements = {
-  heightCm: 176,
-  chestCm: 91,
-  waistCm: 73,
-  hipsCm: 99,
-  shoulderWidthCm: 38,
-  armLengthCm: 58,
-  inseamCm: 78,
-  neckCm: 33,
-  thighCm: 54,
-};
 
 function AutoRotate({ reducedMotion }: { reducedMotion: boolean }) {
-  const figureRef = useRef<MannequinFigureHandle>(null);
-  const activityRef = useRef(0.1);
+  const mannequinRef = useRef<MannequinHandle>(null);
 
   useFrame((_, delta) => {
-    const root = figureRef.current?.root as Group | null | undefined;
-    if (root && !reducedMotion) {
-      root.rotation.y += delta * 0.35;
+    const group = mannequinRef.current?.group;
+    if (group && !reducedMotion) {
+      group.rotation.y += delta * 0.35;
     }
   });
 
-  return (
-    <MannequinFigure ref={figureRef} measurements={HERO_MEASUREMENTS} garment={null} activityRef={activityRef} />
-  );
+  return <Mannequin ref={mannequinRef} gender="female" measurements={DEFAULT_FEMALE_MEASUREMENTS} />;
 }
 
 /** Purely ambient, non-interactive hero visual — no OrbitControls, minimal render cost. */
@@ -45,6 +28,7 @@ export function HeroMannequin() {
       dpr={[1, 1.5]}
       camera={{ position: [0, 0.95, 2.4], fov: 30 }}
       gl={{ antialias: true, powerPreference: "low-power" }}
+      onCreated={({ camera }) => camera.lookAt(0, 0.9, 0)}
     >
       <color attach="background" args={["#F5F1EA"]} />
       <Suspense fallback={null}>
