@@ -1,0 +1,67 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: onion3d
+          POSTGRES_PASSWORD: onion3d_ci
+          POSTGRES_DB: onion3d
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U onion3d"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgresql://onion3d:onion3d_ci@localhost:5432/onion3d?schema=public
+      AUTH_SECRET: ci-only-secret-not-for-production-use
+      AUTH_URL: http://localhost:3000
+      PAYMENT_PROVIDER: mock
+      STORAGE_ENDPOINT: http://localhost:9000
+      STORAGE_REGION: us-east-1
+      STORAGE_ACCESS_KEY_ID: onion3d
+      STORAGE_SECRET_ACCESS_KEY: onion3d_ci_secret
+      STORAGE_BUCKET: onion3d-assets
+      STORAGE_PUBLIC_BASE_URL: http://localhost:9000/onion3d-assets
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate Prisma client
+        run: npx prisma generate
+
+      - name: Run migrations
+        run: npx prisma migrate deploy
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Type check
+        run: npm run typecheck
+
+      - name: Unit tests
+        run: npm run test
+
+      - name: Production build
+        run: npm run build

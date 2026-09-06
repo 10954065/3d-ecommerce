@@ -1,0 +1,41 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: onion3d-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: onion3d
+      POSTGRES_PASSWORD: onion3d_dev
+      POSTGRES_DB: onion3d
+    ports:
+      - "5442:5432"
+    volumes:
+      - onion3d_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U onion3d"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  minio:
+    image: minio/minio:latest
+    container_name: onion3d-minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: onion3d
+      MINIO_ROOT_PASSWORD: onion3d_dev_secret
+    ports:
+      - "9020:9000"
+      - "9021:9001"
+    volumes:
+      - onion3d_minio_data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  onion3d_postgres_data:
+  onion3d_minio_data:

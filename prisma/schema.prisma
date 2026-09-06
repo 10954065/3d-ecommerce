@@ -1,0 +1,696 @@
+// Onion 3D Fashion Platform — core data model.
+// See docs/ARCHITECTURE.md for the rationale behind the 3D asset / simulation split.
+
+generator client {
+  provider     = "prisma-client"
+  output       = "../src/generated/prisma"
+  moduleFormat = "esm"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ---------------------------------------------------------------------------
+// Auth / Users
+// ---------------------------------------------------------------------------
+
+enum UserRole {
+  CUSTOMER
+  ADMIN
+  STAFF
+}
+
+model User {
+  id            String    @id @default(cuid())
+  email         String    @unique
+  emailVerified DateTime?
+  passwordHash  String?
+  name          String?
+  image         String?
+  role          UserRole  @default(CUSTOMER)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  accounts       Account[]
+  sessions       Session[]
+  addresses      Address[]
+  cart           Cart?
+  orders         Order[]
+  wishlist       Wishlist?
+  reviews        Review[]
+  analyticsEvents AnalyticsEvent[]
+  savedProfile   CustomerBodyProfile?
+
+  @@map("users")
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@map("accounts")
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("sessions")
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+  @@map("verification_tokens")
+}
+
+model Address {
+  id          String   @id @default(cuid())
+  // Nullable to support guest checkout — a guest address is a one-off
+  // shipping snapshot tied only to its Order, not to any User account.
+  userId      String?
+  label       String?
+  fullName    String
+  phone       String
+  line1       String
+  line2       String?
+  city        String
+  state       String?
+  postalCode  String?
+  country     String
+  isDefault   Boolean  @default(false)
+  createdAt   DateTime @default(now())
+
+  user   User?   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  orders Order[]
+
+  @@map("addresses")
+}
+
+// ---------------------------------------------------------------------------
+// Catalog
+// ---------------------------------------------------------------------------
+
+enum Gender {
+  MEN
+  WOMEN
+  UNISEX
+}
+
+model Brand {
+  id          String    @id @default(cuid())
+  name        String    @unique
+  slug        String    @unique
+  description String?
+  logoUrl     String?
+  createdAt   DateTime  @default(now())
+
+  products Product[]
+
+  @@map("brands")
+}
+
+model Category {
+  id       String  @id @default(cuid())
+  name     String
+  slug     String  @unique
+  gender   Gender
+  parentId String?
+  parent   Category?  @relation("CategoryTree", fields: [parentId], references: [id])
+  children Category[] @relation("CategoryTree")
+
+  products Product[]
+
+  @@map("categories")
+}
+
+model Collection {
+  id          String   @id @default(cuid())
+  name        String
+  slug        String   @unique
+  description String?
+  heroImageUrl String?
+  isFeatured  Boolean  @default(false)
+  createdAt   DateTime @default(now())
+
+  products Product[] @relation("CollectionProducts")
+
+  @@map("collections")
+}
+
+enum FitType {
+  SLIM
+  REGULAR
+  RELAXED
+  OVERSIZED
+}
+
+enum ProductStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+
+model Product {
+  id                String        @id @default(cuid())
+  brandId           String
+  categoryId        String
+  name              String
+  slug              String        @unique
+  description       String        @db.Text
+  gender            Gender
+  fit               FitType       @default(REGULAR)
+  basePrice         Decimal       @db.Decimal(10, 2)
+  compareAtPrice    Decimal?      @db.Decimal(10, 2)
+  currency          String        @default("GHS")
+  sku               String        @unique
+  materialSummary   String?
+  careInstructions  String?       @db.Text
+  status            ProductStatus @default(DRAFT)
+  seoTitle          String?
+  seoDescription    String?
+  publish3D         Boolean       @default(false)
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+
+  brand      Brand      @relation(fields: [brandId], references: [id])
+  category   Category   @relation(fields: [categoryId], references: [id])
+  collections Collection[] @relation("CollectionProducts")
+
+  variants        ProductVariant[]
+  media           ProductMedia[]
+  colors          ProductColor[]
+  garmentAsset    GarmentAsset?
+  reviews         Review[]
+  wishlistItems   WishlistItem[]
+  cartItems       CartItem[]
+  orderItems      OrderItem[]
+  analyticsEvents AnalyticsEvent[]
+  threeDViewEvents ThreeDViewEvent[]
+
+  @@index([gender, categoryId, status])
+  @@map("products")
+}
+
+model ProductColor {
+  id        String  @id @default(cuid())
+  productId String
+  name      String
+  hexCode   String
+  swatchUrl String?
+
+  product  Product          @relation(fields: [productId], references: [id], onDelete: Cascade)
+  variants ProductVariant[]
+
+  @@unique([productId, name])
+  @@map("product_colors")
+}
+
+enum SizeLabel {
+  XS
+  S
+  M
+  L
+  XL
+  XXL
+  XXXL
+}
+
+model ProductVariant {
+  id            String    @id @default(cuid())
+  productId     String
+  colorId       String
+  size          SizeLabel
+  sku           String    @unique
+  priceOverride Decimal?  @db.Decimal(10, 2)
+  stockQuantity Int       @default(0)
+  lowStockAt    Int       @default(5)
+  isActive      Boolean   @default(true)
+
+  product      Product        @relation(fields: [productId], references: [id], onDelete: Cascade)
+  color        ProductColor   @relation(fields: [colorId], references: [id], onDelete: Cascade)
+  garmentSize  GarmentSize?
+  cartItems    CartItem[]
+  orderItems   OrderItem[]
+  wishlistItems WishlistItem[]
+
+  @@unique([productId, colorId, size])
+  @@map("product_variants")
+}
+
+enum MediaType {
+  IMAGE
+  VIDEO
+  THUMBNAIL_360
+}
+
+model ProductMedia {
+  id        String    @id @default(cuid())
+  productId String
+  type      MediaType
+  url       String
+  altText   String?
+  sortOrder Int       @default(0)
+  colorId   String?
+
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@map("product_media")
+}
+
+// ---------------------------------------------------------------------------
+// Mannequin system
+// ---------------------------------------------------------------------------
+
+model Mannequin {
+  id              String    @id @default(cuid())
+  gender          Gender
+  size            SizeLabel
+  bodyType        String    @default("standard") // standard | petite | tall | plus | athletic
+  heightCm        Float
+  chestCm         Float
+  waistCm         Float
+  hipsCm          Float
+  shoulderWidthCm Float
+  armLengthCm     Float
+  inseamCm        Float
+  neckCm          Float
+  thighCm         Float
+  baseModelUrl    String?   // GLB of the neutral mannequin body
+  morphTargetKey  String?   // key into the shared body morph-target set
+  isActive        Boolean   @default(true)
+
+  garmentSizes GarmentSize[]
+  simulationVariants SimulationVariant[]
+
+  @@unique([gender, size, bodyType])
+  @@map("mannequins")
+}
+
+// Architecture for a future self-reported measurement -> size recommendation flow.
+model CustomerBodyProfile {
+  id              String   @id @default(cuid())
+  userId          String   @unique
+  heightCm        Float?
+  weightKg        Float?
+  chestCm         Float?
+  waistCm         Float?
+  hipsCm          Float?
+  shoulderWidthCm Float?
+  recommendedSize SizeLabel?
+  updatedAt       DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("customer_body_profiles")
+}
+
+// ---------------------------------------------------------------------------
+// Garment 3D + material + simulation
+// ---------------------------------------------------------------------------
+
+enum SimulationQuality {
+  PERFORMANCE // Level 1 — morph targets + skeletal animation
+  ENHANCED    // Level 2 — WebGPU assisted deformation
+  CINEMATIC   // Level 3 — precomputed simulation sequence (CLO3D/Marvelous/Houdini)
+}
+
+enum AssetStatus {
+  UPLOADED
+  PROCESSING
+  READY
+  FAILED
+  ARCHIVED
+}
+
+model FabricMaterial {
+  id                String  @id @default(cuid())
+  name              String  @unique // Cotton, Silk, Denim, Wool, Leather, Linen...
+  massGsm           Float   // fabric weight, grams per square meter
+  friction          Float   // 0-1
+  stiffness         Float   // 0-1
+  bendingResistance Float   // 0-1
+  stretchResistance Float   // 0-1
+  damping           Float   // 0-1
+  elasticity        Float   // 0-1
+  drape             String  // low | medium | high
+  breathability     String  // low | medium | high
+  normalMapUrl      String?
+  roughnessMapUrl   String?
+  albedoMapUrl      String?
+
+  garmentAssets GarmentAsset[]
+
+  @@map("fabric_materials")
+}
+
+model GarmentAsset {
+  id                String            @id @default(cuid())
+  productId         String            @unique
+  fabricMaterialId  String
+  baseModelUrl      String            // low/mid poly GLB, Draco-compressed
+  highResModelUrl   String?
+  simulationQuality SimulationQuality @default(PERFORMANCE)
+  normalMapUrl      String?
+  roughnessMapUrl   String?
+  metallicMapUrl    String?
+  displacementMapUrl String?
+  alphaMapUrl       String?
+  status            AssetStatus       @default(UPLOADED)
+  processingError   String?
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+
+  product        Product          @relation(fields: [productId], references: [id], onDelete: Cascade)
+  fabricMaterial FabricMaterial   @relation(fields: [fabricMaterialId], references: [id])
+  garmentSizes   GarmentSize[]
+  animations     GarmentAnimation[]
+  simulationAssets SimulationAsset[]
+
+  @@map("garment_assets")
+}
+
+// Per-size fitting data: how the garment mesh deforms/offsets against a given mannequin.
+model GarmentSize {
+  id               String  @id @default(cuid())
+  garmentAssetId   String
+  mannequinId      String
+  productVariantId String? @unique
+  morphTargetKey   String? // name of the morph target on the garment mesh for this size
+  fitOffsetJson    Json?   // per-region offsets (chest, waist, sleeve...) for precomputed fitting
+  collisionVolumeUrl String? // simplified collision mesh used for cloth/body collision hints
+
+  garmentAsset   GarmentAsset    @relation(fields: [garmentAssetId], references: [id], onDelete: Cascade)
+  mannequin      Mannequin       @relation(fields: [mannequinId], references: [id])
+  productVariant ProductVariant? @relation(fields: [productVariantId], references: [id])
+
+  @@unique([garmentAssetId, mannequinId])
+  @@map("garment_sizes")
+}
+
+enum AnimationClip {
+  IDLE
+  TURN_360
+  WALK
+  ARM_RAISE
+  WEIGHT_SHIFT
+  FABRIC_TEST
+}
+
+model GarmentAnimation {
+  id             String        @id @default(cuid())
+  garmentAssetId String
+  clip           AnimationClip
+  clipUrl        String?       // GLB animation clip, or null to use the procedural fallback
+  durationMs     Int           @default(4000)
+
+  garmentAsset GarmentAsset @relation(fields: [garmentAssetId], references: [id], onDelete: Cascade)
+
+  @@unique([garmentAssetId, clip])
+  @@map("garment_animations")
+}
+
+// Precomputed cinematic simulation sequences (Level 3), produced offline in CLO3D/Marvelous/Houdini.
+model SimulationAsset {
+  id             String            @id @default(cuid())
+  garmentAssetId String
+  quality        SimulationQuality
+  sequenceUrl    String            // baked vertex-animation texture or alembic-derived GLB sequence
+  frameCount     Int
+  fps            Int               @default(30)
+  status         AssetStatus       @default(UPLOADED)
+  createdAt      DateTime          @default(now())
+
+  garmentAsset GarmentAsset       @relation(fields: [garmentAssetId], references: [id], onDelete: Cascade)
+  variants     SimulationVariant[]
+
+  @@map("simulation_assets")
+}
+
+model SimulationVariant {
+  id                String @id @default(cuid())
+  simulationAssetId String
+  mannequinId       String
+
+  simulationAsset SimulationAsset @relation(fields: [simulationAssetId], references: [id], onDelete: Cascade)
+  mannequin       Mannequin       @relation(fields: [mannequinId], references: [id])
+
+  @@unique([simulationAssetId, mannequinId])
+  @@map("simulation_variants")
+}
+
+// ---------------------------------------------------------------------------
+// Cart / Wishlist
+// ---------------------------------------------------------------------------
+
+model Cart {
+  id        String   @id @default(cuid())
+  userId    String?  @unique
+  guestId   String?  @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user  User?      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  items CartItem[]
+
+  @@map("carts")
+}
+
+model CartItem {
+  id               String   @id @default(cuid())
+  cartId           String
+  productId        String
+  productVariantId String
+  quantity         Int      @default(1)
+  addedAt          DateTime @default(now())
+
+  cart           Cart           @relation(fields: [cartId], references: [id], onDelete: Cascade)
+  product        Product        @relation(fields: [productId], references: [id])
+  productVariant ProductVariant @relation(fields: [productVariantId], references: [id])
+
+  @@unique([cartId, productVariantId])
+  @@map("cart_items")
+}
+
+model Wishlist {
+  id     String @id @default(cuid())
+  userId String @unique
+
+  user  User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  items WishlistItem[]
+
+  @@map("wishlists")
+}
+
+model WishlistItem {
+  id                 String   @id @default(cuid())
+  wishlistId         String
+  productId          String
+  preferredVariantId String?
+  preferredMannequinId String?
+  addedAt            DateTime @default(now())
+
+  wishlist Wishlist        @relation(fields: [wishlistId], references: [id], onDelete: Cascade)
+  product  Product         @relation(fields: [productId], references: [id])
+  variant  ProductVariant? @relation(fields: [preferredVariantId], references: [id])
+
+  @@unique([wishlistId, productId])
+  @@map("wishlist_items")
+}
+
+// ---------------------------------------------------------------------------
+// Orders / Payments
+// ---------------------------------------------------------------------------
+
+enum OrderStatus {
+  PENDING
+  PROCESSING
+  SHIPPED
+  DELIVERED
+  CANCELLED
+  REFUNDED
+}
+
+enum PaymentStatus {
+  PENDING
+  PAID
+  FAILED
+  REFUNDED
+}
+
+model Order {
+  id              String      @id @default(cuid())
+  orderNumber     String      @unique
+  // Nullable to support guest checkout — see Address.userId.
+  userId          String?
+  // Contact email for guest orders (signed-in orders use user.email).
+  guestEmail      String?
+  addressId       String
+  status          OrderStatus @default(PENDING)
+  subtotal        Decimal     @db.Decimal(10, 2)
+  shippingTotal   Decimal     @db.Decimal(10, 2)
+  taxTotal        Decimal     @db.Decimal(10, 2)
+  discountTotal   Decimal     @default(0) @db.Decimal(10, 2)
+  grandTotal      Decimal     @db.Decimal(10, 2)
+  currency        String      @default("GHS")
+  couponCode      String?
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+
+  user    User?       @relation(fields: [userId], references: [id])
+  address Address     @relation(fields: [addressId], references: [id])
+  items   OrderItem[]
+  payment Payment?
+
+  @@map("orders")
+}
+
+model OrderItem {
+  id               String  @id @default(cuid())
+  orderId          String
+  productId        String
+  productVariantId String
+  productName      String  // snapshot at time of order
+  variantLabel     String  // snapshot, e.g. "Black / M"
+  unitPrice        Decimal @db.Decimal(10, 2)
+  quantity         Int
+
+  order          Order          @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product        Product        @relation(fields: [productId], references: [id])
+  productVariant ProductVariant @relation(fields: [productVariantId], references: [id])
+
+  @@map("order_items")
+}
+
+model Payment {
+  id            String        @id @default(cuid())
+  orderId       String        @unique
+  provider      String        // "mock" | "stripe" | "paystack" | "flutterwave"
+  providerRef   String?
+  status        PaymentStatus @default(PENDING)
+  amount        Decimal       @db.Decimal(10, 2)
+  currency      String        @default("GHS")
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@map("payments")
+}
+
+model ShippingZone {
+  id        String   @id @default(cuid())
+  name      String
+  countries String[] // ISO country codes
+  flatRate  Decimal  @db.Decimal(10, 2)
+  currency  String   @default("GHS")
+
+  @@map("shipping_zones")
+}
+
+model Coupon {
+  id            String   @id @default(cuid())
+  code          String   @unique
+  percentOff    Int?
+  amountOff     Decimal? @db.Decimal(10, 2)
+  isActive      Boolean  @default(true)
+  expiresAt     DateTime?
+  usageLimit    Int?
+  timesUsed     Int      @default(0)
+
+  @@map("coupons")
+}
+
+// ---------------------------------------------------------------------------
+// Reviews
+// ---------------------------------------------------------------------------
+
+model Review {
+  id        String   @id @default(cuid())
+  productId String
+  userId    String
+  rating    Int      // 1-5
+  title     String?
+  body      String?  @db.Text
+  createdAt DateTime @default(now())
+
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([productId, userId])
+  @@map("reviews")
+}
+
+// ---------------------------------------------------------------------------
+// Analytics
+// ---------------------------------------------------------------------------
+
+enum AnalyticsEventType {
+  PRODUCT_VIEW
+  THREE_D_VIEW_OPENED
+  MANNEQUIN_SELECTED
+  SIZE_SELECTED
+  COLOR_SELECTED
+  SIMULATION_STARTED
+  SIMULATION_COMPLETED
+  THREE_D_ROTATION
+  THREE_D_ZOOM
+  FABRIC_VIEWED
+  ADD_TO_CART
+  CHECKOUT_STARTED
+  PURCHASE_COMPLETED
+}
+
+model AnalyticsEvent {
+  id        String             @id @default(cuid())
+  type      AnalyticsEventType
+  userId    String?
+  productId String?
+  sessionId String?
+  metadata  Json?
+  createdAt DateTime           @default(now())
+
+  user    User?    @relation(fields: [userId], references: [id])
+  product Product? @relation(fields: [productId], references: [id])
+
+  @@index([type, createdAt])
+  @@index([productId, type])
+  @@map("analytics_events")
+}
+
+// Dedicated, higher-cardinality table for fine-grained 3D viewer telemetry (rotation/zoom deltas).
+model ThreeDViewEvent {
+  id         String   @id @default(cuid())
+  productId  String
+  sessionId  String
+  mannequinSize SizeLabel?
+  colorName  String?
+  durationMs Int?
+  action     String   // "rotate" | "zoom" | "pan" | "animation_play" | "fabric_zoom"
+  createdAt  DateTime @default(now())
+
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@index([productId, createdAt])
+  @@map("three_d_view_events")
+}
