@@ -2,7 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import type { Metadata } from "next";
 import { auth } from "@/auth";
-import { prisma } from "@/lib/db";
+import { prismaUnsafe, getTenantDb } from "@/lib/db";
 import { formatMoney } from "@/lib/format";
 import { signOutAction } from "@/app/actions/auth-actions";
 import { Button } from "@/components/ui/button";
@@ -29,17 +29,18 @@ export default async function AccountPage() {
   }
 
   const userId = session.user.id;
+  const db = await getTenantDb();
 
   const [user, addresses, orders] = await Promise.all([
-    prisma.user.findUnique({
+    prismaUnsafe.user.findUnique({
       where: { id: userId },
       select: { name: true, email: true, createdAt: true },
     }),
-    prisma.address.findMany({
+    db.address.findMany({
       where: { userId },
       orderBy: [{ isDefault: "desc" }, { createdAt: "desc" }],
     }),
-    prisma.order.findMany({
+    db.order.findMany({
       where: { userId },
       include: { items: true, payment: true },
       orderBy: { createdAt: "desc" },

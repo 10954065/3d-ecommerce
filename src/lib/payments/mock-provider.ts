@@ -1,4 +1,4 @@
-import { prisma } from "@/lib/db";
+import { getTenantDb } from "@/lib/db";
 import type {
   InitiatePaymentParams,
   InitiatePaymentResult,
@@ -27,7 +27,8 @@ export class MockPaymentProvider implements PaymentProvider {
 
   async verify(providerRef: string): Promise<VerifyPaymentResult> {
     const orderId = providerRef.replace(/^mock_/, "");
-    const payment = await prisma.payment.findUnique({ where: { orderId } });
+    const db = await getTenantDb();
+    const payment = await db.payment.findUnique({ where: { orderId } });
     if (!payment) {
       return { status: "pending", amount: 0, currency: "GHS" };
     }

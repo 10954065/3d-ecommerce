@@ -1,10 +1,12 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { randomUUID } from "crypto";
+import { resolveTenantByHost } from "@/lib/tenant/resolve";
+import { TENANT_HEADER } from "@/lib/tenant/context";
 
 const GUEST_CART_COOKIE = "onion3d_guest_cart";
 
-export default auth((req) => {
+export default auth(async (req) => {
   const { pathname } = req.nextUrl;
   const isAdminRoute = pathname.startsWith("/admin");
   const isAccountRoute = pathname.startsWith("/account");
@@ -19,7 +21,19 @@ export default auth((req) => {
     return NextResponse.redirect(new URL("/", req.nextUrl.origin));
   }
 
-  const response = NextResponse.next();
+  // Tenant resolution happens here (not per-query) so every downstream
+  // Server Component/Action/Route Handler can trust `getTenantId()` without
+  // re-resolving the host itself. Never trust a client-supplied tenant
+  // header — `Headers.set` below overwrites any inbound value at this key.
+  const host = req.headers.get("host") ?? "";
+  const tenant = await resolveTenantByHost(host);
+  if (!tenant) {
+    return new NextResponse("Unknown storefront host.", { status: 404 });
+  }
+
+  const forwardedHeaders = new Headers(req.headers);
+  forwardedHeaders.set(TENANT_HEADER, tenant.tenantId);
+  const response = NextResponse.next({ request: { headers: forwardedHeaders } });
 
   // Guest cart identity is assigned here (proxy can set cookies on every
   // request) so Server Components downstream only ever need to read it —

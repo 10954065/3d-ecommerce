@@ -2,7 +2,8 @@
 
 import { revalidatePath } from "next/cache";
 import { randomUUID } from "crypto";
-import { prisma } from "@/lib/db";
+import { getTenantDb } from "@/lib/db";
+import { getTenantId } from "@/lib/tenant/context";
 import { requireAdminSession, UNAUTHORIZED_ERROR } from "@/lib/admin-guard";
 import { getStorageProvider, ALLOWED_ASSET_MIME_TYPES, MAX_ASSET_SIZE_BYTES } from "@/lib/storage";
 import { slugify } from "@/lib/slugify";
@@ -43,14 +44,16 @@ export async function uploadMediaAction(
     return { success: false, error: "Could not reach storage service. Please try again." };
   }
 
-  const maxSortOrder = await prisma.productMedia.aggregate({
+  const [db, tenantId] = await Promise.all([getTenantDb(), getTenantId()]);
+  const maxSortOrder = await db.productMedia.aggregate({
     where: { productId },
     _max: { sortOrder: true },
   });
 
   try {
-    await prisma.productMedia.create({
+    await db.productMedia.create({
       data: {
+        tenantId,
         productId,
         type: "IMAGE",
         url: uploaded.url,
@@ -71,7 +74,8 @@ export async function deleteMediaAction(productId: string, mediaId: string): Pro
   const session = await requireAdminSession();
   if (!session) return { success: false, error: UNAUTHORIZED_ERROR };
 
-  const media = await prisma.productMedia.findUnique({ where: { id: mediaId } });
+  const db = await getTenantDb();
+  const media = await db.productMedia.findUnique({ where: { id: mediaId } });
   if (!media || media.productId !== productId) {
     return { success: false, error: "Image not found." };
   }
@@ -89,7 +93,7 @@ export async function deleteMediaAction(productId: string, mediaId: string): Pro
   }
 
   try {
-    await prisma.productMedia.delete({ where: { id: mediaId } });
+    await db.productMedia.delete({ where: { id: mediaId } });
   } catch (error) {
     return { success: false, error: error instanceof Error ? error.message : "Could not delete image." };
   }

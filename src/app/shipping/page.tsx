@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { ContentPage } from "@/components/layout/content-page";
-import { prisma } from "@/lib/db";
+import { getTenantDb } from "@/lib/db";
 import { formatMoney } from "@/lib/format";
 
 export const metadata: Metadata = {
@@ -9,7 +9,8 @@ export const metadata: Metadata = {
 };
 
 export default async function ShippingPage() {
-  const zones = await prisma.shippingZone.findMany({ orderBy: { name: "asc" } });
+  const db = await getTenantDb();
+  const zones = await db.shippingZone.findMany({ orderBy: { name: "asc" } });
 
   return (
     <ContentPage eyebrow="Shipping & Returns" title="Getting your order to you.">

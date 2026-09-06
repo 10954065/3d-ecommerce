@@ -3,7 +3,8 @@
 import { z } from "zod";
 import { redirect } from "next/navigation";
 import { auth } from "@/auth";
-import { prisma } from "@/lib/db";
+import { getTenantDb } from "@/lib/db";
+import { getTenantId } from "@/lib/tenant/context";
 import { getOrCreateCart } from "@/lib/cart";
 import { getPaymentProvider } from "@/lib/payments";
 import { resolveShippingTotal, generateOrderNumber } from "@/lib/checkout";
@@ -72,10 +73,13 @@ export async function placeOrderAction(
     return { error: "Sign in to use a saved address." };
   }
 
+  const db = await getTenantDb();
+  const tenantId = await getTenantId();
+
   let order: { id: string; orderNumber: string };
 
   try {
-    order = await prisma.$transaction(async (tx) => {
+    order = await db.$transaction(async (tx) => {
       let addressId: string;
       let country: string;
 
@@ -91,6 +95,7 @@ export async function placeOrderAction(
       } else {
         const created = await tx.address.create({
           data: {
+            tenantId,
             // Omitted (rather than passed as an explicit `null`) for guests —
             // Prisma's generated input validator treats an explicit `userId:
             // null` on a nullable-relation FK as ambiguous between its
@@ -126,6 +131,7 @@ export async function placeOrderAction(
 
       const createdOrder = await tx.order.create({
         data: {
+          tenantId,
           orderNumber: generateOrderNumber(),
           // See the address create above for why this is omitted rather
           // than explicitly `null` for guest orders.
@@ -140,7 +146,11 @@ export async function placeOrderAction(
           grandTotal,
           currency,
           items: {
+            // Nested creates aren't intercepted by the tenant-scoping
+            // extension (it only sees the top-level Order.create) — tenantId
+            // must be stamped explicitly here. See docs/MULTI_TENANCY.md.
             create: cart.items.map((item) => ({
+              tenantId,
               productId: item.productId,
               productVariantId: item.productVariantId,
               productName: item.product.name,
@@ -151,6 +161,7 @@ export async function placeOrderAction(
           },
           payment: {
             create: {
+              tenantId,
               provider: getPaymentProvider().name,
               status: "PENDING",
               amount: grandTotal,
@@ -192,7 +203,7 @@ export async function placeOrderAction(
   }
 
   const provider = getPaymentProvider();
-  const payment = await prisma.payment.findUniqueOrThrow({ where: { orderId: order.id } });
+  const payment = await db.payment.findUniqueOrThrow({ where: { orderId: order.id } });
   const { providerRef, redirectUrl } = await provider.initiate({
     orderId: order.id,
     orderNumber: order.orderNumber,
@@ -202,7 +213,7 @@ export async function placeOrderAction(
     returnUrl: `/checkout/confirmation/${order.id}`,
   });
 
-  await prisma.payment.update({ where: { orderId: order.id }, data: { providerRef } });
+  await db.payment.update({ where: { orderId: order.id }, data: { providerRef } });
 
   redirect(redirectUrl);
 }
@@ -215,7 +226,8 @@ type MockOutcome = "success" | "failure";
  * the mock payment page — see src/app/checkout/pay/mock/[orderId]/page.tsx.
  */
 export async function simulateMockPaymentAction(orderId: string, outcome: MockOutcome): Promise<void> {
-  const payment = await prisma.payment.findUnique({ where: { orderId } });
+  const db = await getTenantDb();
+  const payment = await db.payment.findUnique({ where: { orderId } });
   if (!payment) {
     throw new Error("Payment record not found.");
   }
@@ -228,17 +240,17 @@ export async function simulateMockPaymentAction(orderId: string, outcome: MockOu
   }
 
   if (outcome === "success") {
-    await prisma.$transaction([
-      prisma.payment.update({ where: { orderId }, data: { status: "PAID" } }),
-      prisma.order.update({ where: { id: orderId }, data: { status: "PROCESSING" } }),
-    ]);
+    await db.$transaction(async (tx) => {
+      await tx.payment.update({ where: { orderId }, data: { status: "PAID" } });
+      await tx.order.update({ where: { id: orderId }, data: { status: "PROCESSING" } });
+    });
     await logAnalyticsEvent({ type: "PURCHASE_COMPLETED" });
     redirect(`/checkout/confirmation/${orderId}`);
   } else {
-    await prisma.$transaction([
-      prisma.payment.update({ where: { orderId }, data: { status: "FAILED" } }),
-      prisma.order.update({ where: { id: orderId }, data: { status: "CANCELLED" } }),
-    ]);
+    await db.$transaction(async (tx) => {
+      await tx.payment.update({ where: { orderId }, data: { status: "FAILED" } });
+      await tx.order.update({ where: { id: orderId }, data: { status: "CANCELLED" } });
+    });
     redirect(`/checkout/failed/${orderId}`);
   }
 }

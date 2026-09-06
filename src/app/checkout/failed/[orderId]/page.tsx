@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import type { Metadata } from "next";
-import { prisma } from "@/lib/db";
+import { getTenantDb } from "@/lib/db";
 import { Button } from "@/components/ui/button";
 
 export const metadata: Metadata = {
@@ -15,7 +15,8 @@ interface FailedPageProps {
 export default async function OrderFailedPage({ params }: FailedPageProps) {
   const { orderId } = await params;
 
-  const order = await prisma.order.findUnique({
+  const db = await getTenantDb();
+  const order = await db.order.findUnique({
     where: { id: orderId },
     include: { payment: true },
   });

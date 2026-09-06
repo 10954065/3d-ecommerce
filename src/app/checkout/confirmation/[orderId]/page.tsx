@@ -2,7 +2,7 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import type { Metadata } from "next";
 import { auth } from "@/auth";
-import { prisma } from "@/lib/db";
+import { getTenantDb } from "@/lib/db";
 import { formatMoney } from "@/lib/format";
 import { Button } from "@/components/ui/button";
 
@@ -17,7 +17,8 @@ interface ConfirmationPageProps {
 export default async function OrderConfirmationPage({ params }: ConfirmationPageProps) {
   const { orderId } = await params;
 
-  const order = await prisma.order.findUnique({
+  const db = await getTenantDb();
+  const order = await db.order.findUnique({
     where: { id: orderId },
     include: { items: true, payment: true, address: true },
   });

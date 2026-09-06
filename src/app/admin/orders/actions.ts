@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
-import { prisma } from "@/lib/db";
+import { getTenantDb } from "@/lib/db";
 import { requireAdminSession, UNAUTHORIZED_ERROR } from "@/lib/admin-guard";
 
 const ORDER_STATUSES = ["PENDING", "PROCESSING", "SHIPPED", "DELIVERED", "CANCELLED", "REFUNDED"] as const;
@@ -33,7 +33,8 @@ export async function updateOrderStatusAction(
   }
 
   try {
-    await prisma.order.update({
+    const db = await getTenantDb();
+    await db.order.update({
       where: { id: orderId },
       data: { status: parsed.data.status },
     });

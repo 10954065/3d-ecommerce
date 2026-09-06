@@ -2,10 +2,12 @@ import NextAuth from "next-auth";
 import Credentials from "next-auth/providers/credentials";
 import { PrismaAdapter } from "@auth/prisma-adapter";
 import bcrypt from "bcryptjs";
-import { prisma } from "@/lib/db";
+import { prismaUnsafe } from "@/lib/db";
 
+// User/Account/Session are platform-global (see docs/MULTI_TENANCY.md) —
+// this file is one of the few allowed to import the raw, tenant-unaware client.
 export const { handlers, auth, signIn, signOut } = NextAuth({
-  adapter: PrismaAdapter(prisma),
+  adapter: PrismaAdapter(prismaUnsafe),
   session: { strategy: "jwt" },
   pages: {
     signIn: "/sign-in",
@@ -22,7 +24,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         const password = credentials?.password as string | undefined;
         if (!email || !password) return null;
 
-        const user = await prisma.user.findUnique({ where: { email } });
+        const user = await prismaUnsafe.user.findUnique({ where: { email } });
         if (!user?.passwordHash) return null;
 
         const isValid = await bcrypt.compare(password, user.passwordHash);

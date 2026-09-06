@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 import type { Metadata } from "next";
 import { auth } from "@/auth";
-import { prisma } from "@/lib/db";
+import { getTenantDb } from "@/lib/db";
 import { getCartSummary } from "@/lib/cart";
 import { computeCart } from "@/lib/checkout";
 import { logAnalyticsEvent } from "@/lib/analytics";
@@ -21,16 +21,16 @@ export default async function CheckoutPage() {
 
   await logAnalyticsEvent({ type: "CHECKOUT_STARTED" });
 
-  const session = await auth();
+  const [session, db] = await Promise.all([auth(), getTenantDb()]);
 
   const [savedAddresses, shippingZones] = await Promise.all([
     session?.user?.id
-      ? prisma.address.findMany({
+      ? db.address.findMany({
           where: { userId: session.user.id },
           orderBy: [{ isDefault: "desc" }, { createdAt: "desc" }],
         })
       : Promise.resolve([]),
-    prisma.shippingZone.findMany(),
+    db.shippingZone.findMany(),
   ]);
 
   return (

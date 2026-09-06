@@ -2,7 +2,8 @@
 
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
-import { prisma } from "@/lib/db";
+import { getTenantDb } from "@/lib/db";
+import { getTenantId } from "@/lib/tenant/context";
 import { requireAdminSession, UNAUTHORIZED_ERROR } from "@/lib/admin-guard";
 import type { ActionResult } from "./color-actions";
 
@@ -36,7 +37,8 @@ export async function upsertGarmentAssetAction(
     return { success: false, error: parsed.error.issues[0]?.message ?? "Invalid garment asset." };
   }
 
-  const product = await prisma.product.findUnique({
+  const [db, tenantId] = await Promise.all([getTenantDb(), getTenantId()]);
+  const product = await db.product.findUnique({
     where: { id: productId },
     select: { gender: true, variants: { select: { size: true }, distinct: ["size"] } },
   });
@@ -47,7 +49,7 @@ export async function upsertGarmentAssetAction(
   const baseModelUrl = `procedural:${parsed.data.archetype}`;
 
   try {
-    const garmentAsset = await prisma.garmentAsset.upsert({
+    const garmentAsset = await db.garmentAsset.upsert({
       where: { productId },
       update: {
         fabricMaterialId: parsed.data.fabricMaterialId,
@@ -56,6 +58,7 @@ export async function upsertGarmentAssetAction(
         status: "READY",
       },
       create: {
+        tenantId,
         productId,
         fabricMaterialId: parsed.data.fabricMaterialId,
         baseModelUrl,
@@ -66,13 +69,16 @@ export async function upsertGarmentAssetAction(
 
     const sizes = product.variants.map((v) => v.size);
     if (sizes.length > 0) {
-      const mannequins = await prisma.mannequin.findMany({
+      const mannequins = await db.mannequin.findMany({
         where: { gender: product.gender, size: { in: sizes }, isActive: true },
       });
 
-      await prisma.$transaction(
-        mannequins.map((mannequin) =>
-          prisma.garmentSize.upsert({
+      // Interactive transaction (not the array form) — extension-wrapped
+      // queries can lose their PrismaPromise batching contract in the array
+      // form. See docs/MULTI_TENANCY.md.
+      await db.$transaction(async (tx) => {
+        for (const mannequin of mannequins) {
+          await tx.garmentSize.upsert({
             where: {
               garmentAssetId_mannequinId: {
                 garmentAssetId: garmentAsset.id,
@@ -81,13 +87,14 @@ export async function upsertGarmentAssetAction(
             },
             update: {},
             create: {
+              tenantId,
               garmentAssetId: garmentAsset.id,
               mannequinId: mannequin.id,
               morphTargetKey: mannequin.size,
             },
-          }),
-        ),
-      );
+          });
+        }
+      });
     }
   } catch (error) {
     return { success: false, error: error instanceof Error ? error.message : "Could not save garment asset." };

@@ -2,7 +2,8 @@
 
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
-import { prisma } from "@/lib/db";
+import { getTenantDb } from "@/lib/db";
+import { getTenantId } from "@/lib/tenant/context";
 import { requireAdminSession, UNAUTHORIZED_ERROR } from "@/lib/admin-guard";
 import { slugify } from "@/lib/slugify";
 import type { ActionResult } from "./color-actions";
@@ -34,9 +35,10 @@ export async function createVariantAction(
     return { success: false, error: parsed.error.issues[0]?.message ?? "Invalid variant." };
   }
 
+  const [db, tenantId] = await Promise.all([getTenantDb(), getTenantId()]);
   const [product, color] = await Promise.all([
-    prisma.product.findUnique({ where: { id: productId }, select: { sku: true } }),
-    prisma.productColor.findUnique({ where: { id: parsed.data.colorId }, select: { name: true } }),
+    db.product.findUnique({ where: { id: productId }, select: { sku: true } }),
+    db.productColor.findUnique({ where: { id: parsed.data.colorId }, select: { name: true } }),
   ]);
   if (!product || !color) {
     return { success: false, error: "Product or color not found." };
@@ -45,8 +47,9 @@ export async function createVariantAction(
   const sku = `${product.sku}-${slugify(color.name)}-${parsed.data.size}`;
 
   try {
-    await prisma.productVariant.create({
+    await db.productVariant.create({
       data: {
+        tenantId,
         productId,
         colorId: parsed.data.colorId,
         size: parsed.data.size,
@@ -87,7 +90,8 @@ export async function updateVariantAction(
   }
 
   try {
-    await prisma.productVariant.update({
+    const db = await getTenantDb();
+    await db.productVariant.update({
       where: { id: variantId },
       data: parsed.data,
     });
@@ -104,7 +108,8 @@ export async function deleteVariantAction(productId: string, variantId: string):
   if (!session) return { success: false, error: UNAUTHORIZED_ERROR };
 
   try {
-    await prisma.productVariant.delete({ where: { id: variantId } });
+    const db = await getTenantDb();
+    await db.productVariant.delete({ where: { id: variantId } });
   } catch (error) {
     return { success: false, error: error instanceof Error ? error.message : "Could not delete variant." };
   }

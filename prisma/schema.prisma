@@ -1,5 +1,6 @@
 // Onion 3D Fashion Platform — core data model.
 // See docs/ARCHITECTURE.md for the rationale behind the 3D asset / simulation split.
+// See docs/MULTI_TENANCY.md for the tenancy migration plan and enforcement model.
 
 generator client {
   provider     = "prisma-client"
@@ -12,7 +13,115 @@ datasource db {
 }
 
 // ---------------------------------------------------------------------------
+// Tenancy
+//
+// Every tenant-scoped model below carries a required `tenantId` FK to Tenant.
+// Isolation is enforced at the Prisma client layer (see src/lib/db/tenant-client.ts,
+// added alongside the call-site migration) — never rely on a query remembering
+// `where: { tenantId }` by hand. See docs/MULTI_TENANCY.md for the full model.
+// ---------------------------------------------------------------------------
+
+enum TenantStatus {
+  ACTIVE
+  SUSPENDED
+  ARCHIVED
+}
+
+// Platform-wide role, independent of any tenant membership. SUPER_ADMIN is
+// the only platform-level elevated role today (operates across tenants).
+enum PlatformRole {
+  SUPER_ADMIN
+  USER
+}
+
+// Role within a specific tenant (a TenantMembership). Superset of today's
+// UserRole (CUSTOMER/ADMIN/STAFF) — see docs/MULTI_TENANCY.md for the mapping.
+enum TenantRole {
+  TENANT_ADMIN
+  CONTENT_MANAGER
+  THREE_D_ARTIST
+  PRODUCT_MANAGER
+  CUSTOMER_SUPPORT
+  ANALYST
+  CUSTOMER
+}
+
+model Tenant {
+  id        String       @id @default(cuid())
+  slug      String       @unique
+  name      String
+  status    TenantStatus @default(ACTIVE)
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+
+  domains     TenantDomain[]
+  memberships TenantMembership[]
+
+  brands             Brand[]
+  categories         Category[]
+  collections        Collection[]
+  products           Product[]
+  productColors      ProductColor[]
+  productVariants    ProductVariant[]
+  productMedia       ProductMedia[]
+  mannequins         Mannequin[]
+  fabricMaterials    FabricMaterial[]
+  garmentAssets      GarmentAsset[]
+  garmentSizes       GarmentSize[]
+  garmentAnimations  GarmentAnimation[]
+  simulationAssets   SimulationAsset[]
+  simulationVariants SimulationVariant[]
+  carts              Cart[]
+  cartItems          CartItem[]
+  wishlists          Wishlist[]
+  wishlistItems      WishlistItem[]
+  addresses          Address[]
+  orders             Order[]
+  orderItems         OrderItem[]
+  payments           Payment[]
+  shippingZones      ShippingZone[]
+  coupons            Coupon[]
+  reviews            Review[]
+  analyticsEvents    AnalyticsEvent[]
+  threeDViewEvents   ThreeDViewEvent[]
+
+  @@map("tenants")
+}
+
+model TenantDomain {
+  id        String   @id @default(cuid())
+  tenantId  String
+  host      String   @unique // e.g. "forme.localhost:3000", "brandb.forme.app", or a custom domain
+  isPrimary Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@map("tenant_domains")
+}
+
+model TenantMembership {
+  id        String     @id @default(cuid())
+  tenantId  String
+  userId    String
+  role      TenantRole @default(CUSTOMER)
+  createdAt DateTime   @default(now())
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, userId])
+  @@index([userId])
+  @@map("tenant_memberships")
+}
+
+// ---------------------------------------------------------------------------
 // Auth / Users
+//
+// User is deliberately tenant-global (no tenantId): identity is shared across
+// tenants (one email/password works platform-wide), while tenant-specific
+// access is granted via TenantMembership. See docs/MULTI_TENANCY.md.
 // ---------------------------------------------------------------------------
 
 enum UserRole {
@@ -22,25 +131,31 @@ enum UserRole {
 }
 
 model User {
-  id            String    @id @default(cuid())
-  email         String    @unique
+  id            String       @id @default(cuid())
+  email         String       @unique
   emailVerified DateTime?
   passwordHash  String?
   name          String?
   image         String?
-  role          UserRole  @default(CUSTOMER)
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
+  // Deprecated: superseded by TenantMembership.role. Kept temporarily so
+  // existing gates (proxy.ts, admin-guard.ts) keep compiling during the
+  // tenancy migration; dropped once every call site reads membership role.
+  role          UserRole     @default(CUSTOMER)
+  platformRole  PlatformRole @default(USER)
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
 
-  accounts       Account[]
-  sessions       Session[]
-  addresses      Address[]
-  cart           Cart?
-  orders         Order[]
-  wishlist       Wishlist?
-  reviews        Review[]
+  accounts        Account[]
+  sessions        Session[]
+  addresses       Address[]
+  // One cart / wishlist per tenant the user has shopped at — see docs/MULTI_TENANCY.md.
+  carts           Cart[]
+  orders          Order[]
+  wishlists       Wishlist[]
+  reviews         Review[]
   analyticsEvents AnalyticsEvent[]
-  savedProfile   CustomerBodyProfile?
+  savedProfile    CustomerBodyProfile?
+  memberships     TenantMembership[]
 
   @@map("users")
 }
@@ -86,6 +201,7 @@ model VerificationToken {
 
 model Address {
   id          String   @id @default(cuid())
+  tenantId    String
   // Nullable to support guest checkout — a guest address is a one-off
   // shipping snapshot tied only to its Order, not to any User account.
   userId      String?
@@ -101,9 +217,11 @@ model Address {
   isDefault   Boolean  @default(false)
   createdAt   DateTime @default(now())
 
+  tenant Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   user   User?   @relation(fields: [userId], references: [id], onDelete: Cascade)
   orders Order[]
 
+  @@index([tenantId])
   @@map("addresses")
 }
 
@@ -119,42 +237,52 @@ enum Gender {
 
 model Brand {
   id          String    @id @default(cuid())
-  name        String    @unique
-  slug        String    @unique
+  tenantId    String
+  name        String
+  slug        String
   description String?
   logoUrl     String?
   createdAt   DateTime  @default(now())
 
+  tenant   Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   products Product[]
 
+  @@unique([tenantId, name])
+  @@unique([tenantId, slug])
   @@map("brands")
 }
 
 model Category {
   id       String  @id @default(cuid())
+  tenantId String
   name     String
-  slug     String  @unique
+  slug     String
   gender   Gender
   parentId String?
   parent   Category?  @relation("CategoryTree", fields: [parentId], references: [id])
   children Category[] @relation("CategoryTree")
 
+  tenant   Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   products Product[]
 
+  @@unique([tenantId, slug])
   @@map("categories")
 }
 
 model Collection {
   id          String   @id @default(cuid())
+  tenantId    String
   name        String
-  slug        String   @unique
+  slug        String
   description String?
   heroImageUrl String?
   isFeatured  Boolean  @default(false)
   createdAt   DateTime @default(now())
 
+  tenant   Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   products Product[] @relation("CollectionProducts")
 
+  @@unique([tenantId, slug])
   @@map("collections")
 }
 
@@ -173,17 +301,18 @@ enum ProductStatus {
 
 model Product {
   id                String        @id @default(cuid())
+  tenantId          String
   brandId           String
   categoryId        String
   name              String
-  slug              String        @unique
+  slug              String
   description       String        @db.Text
   gender            Gender
   fit               FitType       @default(REGULAR)
   basePrice         Decimal       @db.Decimal(10, 2)
   compareAtPrice    Decimal?      @db.Decimal(10, 2)
   currency          String        @default("GHS")
-  sku               String        @unique
+  sku               String
   materialSummary   String?
   careInstructions  String?       @db.Text
   status            ProductStatus @default(DRAFT)
@@ -193,6 +322,7 @@ model Product {
   createdAt         DateTime      @default(now())
   updatedAt         DateTime      @updatedAt
 
+  tenant     Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   brand      Brand      @relation(fields: [brandId], references: [id])
   category   Category   @relation(fields: [categoryId], references: [id])
   collections Collection[] @relation("CollectionProducts")
@@ -208,21 +338,26 @@ model Product {
   analyticsEvents AnalyticsEvent[]
   threeDViewEvents ThreeDViewEvent[]
 
-  @@index([gender, categoryId, status])
+  @@unique([tenantId, slug])
+  @@unique([tenantId, sku])
+  @@index([tenantId, status, gender, categoryId])
   @@map("products")
 }
 
 model ProductColor {
   id        String  @id @default(cuid())
+  tenantId  String
   productId String
   name      String
   hexCode   String
   swatchUrl String?
 
+  tenant   Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   product  Product          @relation(fields: [productId], references: [id], onDelete: Cascade)
   variants ProductVariant[]
 
   @@unique([productId, name])
+  @@index([tenantId])
   @@map("product_colors")
 }
 
@@ -238,15 +373,17 @@ enum SizeLabel {
 
 model ProductVariant {
   id            String    @id @default(cuid())
+  tenantId      String
   productId     String
   colorId       String
   size          SizeLabel
-  sku           String    @unique
+  sku           String
   priceOverride Decimal?  @db.Decimal(10, 2)
   stockQuantity Int       @default(0)
   lowStockAt    Int       @default(5)
   isActive      Boolean   @default(true)
 
+  tenant       Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   product      Product        @relation(fields: [productId], references: [id], onDelete: Cascade)
   color        ProductColor   @relation(fields: [colorId], references: [id], onDelete: Cascade)
   garmentSize  GarmentSize?
@@ -255,6 +392,7 @@ model ProductVariant {
   wishlistItems WishlistItem[]
 
   @@unique([productId, colorId, size])
+  @@unique([tenantId, sku])
   @@map("product_variants")
 }
 
@@ -266,6 +404,7 @@ enum MediaType {
 
 model ProductMedia {
   id        String    @id @default(cuid())
+  tenantId  String
   productId String
   type      MediaType
   url       String
@@ -273,8 +412,10 @@ model ProductMedia {
   sortOrder Int       @default(0)
   colorId   String?
 
+  tenant  Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
 
+  @@index([tenantId])
   @@map("product_media")
 }
 
@@ -284,6 +425,7 @@ model ProductMedia {
 
 model Mannequin {
   id              String    @id @default(cuid())
+  tenantId        String
   gender          Gender
   size            SizeLabel
   bodyType        String    @default("standard") // standard | petite | tall | plus | athletic
@@ -300,14 +442,17 @@ model Mannequin {
   morphTargetKey  String?   // key into the shared body morph-target set
   isActive        Boolean   @default(true)
 
+  tenant       Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   garmentSizes GarmentSize[]
   simulationVariants SimulationVariant[]
 
-  @@unique([gender, size, bodyType])
+  @@unique([tenantId, gender, size, bodyType])
   @@map("mannequins")
 }
 
 // Architecture for a future self-reported measurement -> size recommendation flow.
+// Deliberately tenant-global: a shopper's body measurements are user-owned and
+// apply platform-wide ("measure once, shop every brand"), not tenant data.
 model CustomerBodyProfile {
   id              String   @id @default(cuid())
   userId          String   @unique
@@ -345,7 +490,8 @@ enum AssetStatus {
 
 model FabricMaterial {
   id                String  @id @default(cuid())
-  name              String  @unique // Cotton, Silk, Denim, Wool, Leather, Linen...
+  tenantId          String
+  name              String  // Cotton, Silk, Denim, Wool, Leather, Linen...
   massGsm           Float   // fabric weight, grams per square meter
   friction          Float   // 0-1
   stiffness         Float   // 0-1
@@ -359,13 +505,16 @@ model FabricMaterial {
   roughnessMapUrl   String?
   albedoMapUrl      String?
 
+  tenant        Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   garmentAssets GarmentAsset[]
 
+  @@unique([tenantId, name])
   @@map("fabric_materials")
 }
 
 model GarmentAsset {
   id                String            @id @default(cuid())
+  tenantId          String
   productId         String            @unique
   fabricMaterialId  String
   baseModelUrl      String            // low/mid poly GLB, Draco-compressed
@@ -381,18 +530,21 @@ model GarmentAsset {
   createdAt         DateTime          @default(now())
   updatedAt         DateTime          @updatedAt
 
+  tenant         Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   product        Product          @relation(fields: [productId], references: [id], onDelete: Cascade)
   fabricMaterial FabricMaterial   @relation(fields: [fabricMaterialId], references: [id])
   garmentSizes   GarmentSize[]
   animations     GarmentAnimation[]
   simulationAssets SimulationAsset[]
 
+  @@index([tenantId])
   @@map("garment_assets")
 }
 
 // Per-size fitting data: how the garment mesh deforms/offsets against a given mannequin.
 model GarmentSize {
   id               String  @id @default(cuid())
+  tenantId         String
   garmentAssetId   String
   mannequinId      String
   productVariantId String? @unique
@@ -400,6 +552,7 @@ model GarmentSize {
   fitOffsetJson    Json?   // per-region offsets (chest, waist, sleeve...) for precomputed fitting
   collisionVolumeUrl String? // simplified collision mesh used for cloth/body collision hints
 
+  tenant         Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   garmentAsset   GarmentAsset    @relation(fields: [garmentAssetId], references: [id], onDelete: Cascade)
   mannequin      Mannequin       @relation(fields: [mannequinId], references: [id])
   productVariant ProductVariant? @relation(fields: [productVariantId], references: [id])
@@ -419,11 +572,13 @@ enum AnimationClip {
 
 model GarmentAnimation {
   id             String        @id @default(cuid())
+  tenantId       String
   garmentAssetId String
   clip           AnimationClip
   clipUrl        String?       // GLB animation clip, or null to use the procedural fallback
   durationMs     Int           @default(4000)
 
+  tenant       Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   garmentAsset GarmentAsset @relation(fields: [garmentAssetId], references: [id], onDelete: Cascade)
 
   @@unique([garmentAssetId, clip])
@@ -433,6 +588,7 @@ model GarmentAnimation {
 // Precomputed cinematic simulation sequences (Level 3), produced offline in CLO3D/Marvelous/Houdini.
 model SimulationAsset {
   id             String            @id @default(cuid())
+  tenantId       String
   garmentAssetId String
   quality        SimulationQuality
   sequenceUrl    String            // baked vertex-animation texture or alembic-derived GLB sequence
@@ -441,17 +597,21 @@ model SimulationAsset {
   status         AssetStatus       @default(UPLOADED)
   createdAt      DateTime          @default(now())
 
+  tenant       Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   garmentAsset GarmentAsset       @relation(fields: [garmentAssetId], references: [id], onDelete: Cascade)
   variants     SimulationVariant[]
 
+  @@index([tenantId])
   @@map("simulation_assets")
 }
 
 model SimulationVariant {
   id                String @id @default(cuid())
+  tenantId          String
   simulationAssetId String
   mannequinId       String
 
+  tenant          Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   simulationAsset SimulationAsset @relation(fields: [simulationAssetId], references: [id], onDelete: Cascade)
   mannequin       Mannequin       @relation(fields: [mannequinId], references: [id])
 
@@ -465,25 +625,31 @@ model SimulationVariant {
 
 model Cart {
   id        String   @id @default(cuid())
-  userId    String?  @unique
-  guestId   String?  @unique
+  tenantId  String
+  userId    String?
+  guestId   String?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  tenant Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   user  User?      @relation(fields: [userId], references: [id], onDelete: Cascade)
   items CartItem[]
 
+  @@unique([tenantId, userId])
+  @@unique([tenantId, guestId])
   @@map("carts")
 }
 
 model CartItem {
   id               String   @id @default(cuid())
+  tenantId         String
   cartId           String
   productId        String
   productVariantId String
   quantity         Int      @default(1)
   addedAt          DateTime @default(now())
 
+  tenant         Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   cart           Cart           @relation(fields: [cartId], references: [id], onDelete: Cascade)
   product        Product        @relation(fields: [productId], references: [id])
   productVariant ProductVariant @relation(fields: [productVariantId], references: [id])
@@ -493,23 +659,28 @@ model CartItem {
 }
 
 model Wishlist {
-  id     String @id @default(cuid())
-  userId String @unique
+  id       String  @id @default(cuid())
+  tenantId String
+  userId   String
 
+  tenant Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   user  User           @relation(fields: [userId], references: [id], onDelete: Cascade)
   items WishlistItem[]
 
+  @@unique([tenantId, userId])
   @@map("wishlists")
 }
 
 model WishlistItem {
   id                 String   @id @default(cuid())
+  tenantId           String
   wishlistId         String
   productId          String
   preferredVariantId String?
   preferredMannequinId String?
   addedAt            DateTime @default(now())
 
+  tenant   Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   wishlist Wishlist        @relation(fields: [wishlistId], references: [id], onDelete: Cascade)
   product  Product         @relation(fields: [productId], references: [id])
   variant  ProductVariant? @relation(fields: [preferredVariantId], references: [id])
@@ -540,7 +711,8 @@ enum PaymentStatus {
 
 model Order {
   id              String      @id @default(cuid())
-  orderNumber     String      @unique
+  tenantId        String
+  orderNumber     String
   // Nullable to support guest checkout — see Address.userId.
   userId          String?
   // Contact email for guest orders (signed-in orders use user.email).
@@ -557,16 +729,20 @@ model Order {
   createdAt       DateTime    @default(now())
   updatedAt       DateTime    @updatedAt
 
+  tenant  Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   user    User?       @relation(fields: [userId], references: [id])
   address Address     @relation(fields: [addressId], references: [id])
   items   OrderItem[]
   payment Payment?
 
+  @@unique([tenantId, orderNumber])
+  @@index([tenantId, createdAt])
   @@map("orders")
 }
 
 model OrderItem {
   id               String  @id @default(cuid())
+  tenantId         String
   orderId          String
   productId        String
   productVariantId String
@@ -575,15 +751,18 @@ model OrderItem {
   unitPrice        Decimal @db.Decimal(10, 2)
   quantity         Int
 
+  tenant         Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   order          Order          @relation(fields: [orderId], references: [id], onDelete: Cascade)
   product        Product        @relation(fields: [productId], references: [id])
   productVariant ProductVariant @relation(fields: [productVariantId], references: [id])
 
+  @@index([tenantId])
   @@map("order_items")
 }
 
 model Payment {
   id            String        @id @default(cuid())
+  tenantId      String
   orderId       String        @unique
   provider      String        // "mock" | "stripe" | "paystack" | "flutterwave"
   providerRef   String?
@@ -593,24 +772,31 @@ model Payment {
   createdAt     DateTime      @default(now())
   updatedAt     DateTime      @updatedAt
 
-  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  order  Order  @relation(fields: [orderId], references: [id], onDelete: Cascade)
 
+  @@index([tenantId])
   @@map("payments")
 }
 
 model ShippingZone {
   id        String   @id @default(cuid())
+  tenantId  String
   name      String
   countries String[] // ISO country codes
   flatRate  Decimal  @db.Decimal(10, 2)
   currency  String   @default("GHS")
 
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
   @@map("shipping_zones")
 }
 
 model Coupon {
   id            String   @id @default(cuid())
-  code          String   @unique
+  tenantId      String
+  code          String
   percentOff    Int?
   amountOff     Decimal? @db.Decimal(10, 2)
   isActive      Boolean  @default(true)
@@ -618,6 +804,9 @@ model Coupon {
   usageLimit    Int?
   timesUsed     Int      @default(0)
 
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, code])
   @@map("coupons")
 }
 
@@ -627,6 +816,7 @@ model Coupon {
 
 model Review {
   id        String   @id @default(cuid())
+  tenantId  String
   productId String
   userId    String
   rating    Int      // 1-5
@@ -634,6 +824,7 @@ model Review {
   body      String?  @db.Text
   createdAt DateTime @default(now())
 
+  tenant  Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
   user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -663,6 +854,7 @@ enum AnalyticsEventType {
 
 model AnalyticsEvent {
   id        String             @id @default(cuid())
+  tenantId  String
   type      AnalyticsEventType
   userId    String?
   productId String?
@@ -670,17 +862,20 @@ model AnalyticsEvent {
   metadata  Json?
   createdAt DateTime           @default(now())
 
+  tenant  Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   user    User?    @relation(fields: [userId], references: [id])
   product Product? @relation(fields: [productId], references: [id])
 
   @@index([type, createdAt])
   @@index([productId, type])
+  @@index([tenantId, type, createdAt])
   @@map("analytics_events")
 }
 
 // Dedicated, higher-cardinality table for fine-grained 3D viewer telemetry (rotation/zoom deltas).
 model ThreeDViewEvent {
   id         String   @id @default(cuid())
+  tenantId   String
   productId  String
   sessionId  String
   mannequinSize SizeLabel?
@@ -689,8 +884,10 @@ model ThreeDViewEvent {
   action     String   // "rotate" | "zoom" | "pan" | "animation_play" | "fabric_zoom"
   createdAt  DateTime @default(now())
 
+  tenant  Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
 
   @@index([productId, createdAt])
+  @@index([tenantId, productId, createdAt])
   @@map("three_d_view_events")
 }

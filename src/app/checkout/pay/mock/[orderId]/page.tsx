@@ -1,6 +1,6 @@
 import { notFound, redirect } from "next/navigation";
 import type { Metadata } from "next";
-import { prisma } from "@/lib/db";
+import { getTenantDb } from "@/lib/db";
 import { formatMoney } from "@/lib/format";
 import { simulateMockPaymentAction } from "@/app/actions/checkout-actions";
 import { Button } from "@/components/ui/button";
@@ -16,7 +16,8 @@ interface MockPayPageProps {
 export default async function MockPayPage({ params }: MockPayPageProps) {
   const { orderId } = await params;
 
-  const order = await prisma.order.findUnique({
+  const db = await getTenantDb();
+  const order = await db.order.findUnique({
     where: { id: orderId },
     include: { items: true, payment: true },
   });

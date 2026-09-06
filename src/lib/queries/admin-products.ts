@@ -1,5 +1,5 @@
 import "server-only";
-import { prisma } from "@/lib/db";
+import { getTenantDb } from "@/lib/db";
 import type { Gender } from "@/generated/prisma/client";
 
 export const PRODUCTS_PAGE_SIZE = 20;
@@ -10,6 +10,7 @@ interface ListProductsParams {
 }
 
 export async function listProducts({ search, page = 1 }: ListProductsParams) {
+  const db = await getTenantDb();
   const where = search
     ? {
         OR: [
@@ -20,7 +21,7 @@ export async function listProducts({ search, page = 1 }: ListProductsParams) {
     : {};
 
   const [products, total] = await Promise.all([
-    prisma.product.findMany({
+    db.product.findMany({
       where,
       select: {
         id: true,
@@ -42,7 +43,7 @@ export async function listProducts({ search, page = 1 }: ListProductsParams) {
       skip: (page - 1) * PRODUCTS_PAGE_SIZE,
       take: PRODUCTS_PAGE_SIZE,
     }),
-    prisma.product.count({ where }),
+    db.product.count({ where }),
   ]);
 
   return {
@@ -65,7 +66,8 @@ export async function listProducts({ search, page = 1 }: ListProductsParams) {
 }
 
 export async function getProductForEdit(id: string) {
-  return prisma.product.findUnique({
+  const db = await getTenantDb();
+  return db.product.findUnique({
     where: { id },
     include: {
       brand: true,
@@ -84,21 +86,26 @@ export async function getProductForEdit(id: string) {
 }
 
 export async function getBrands() {
-  return prisma.brand.findMany({ orderBy: { name: "asc" } });
+  const db = await getTenantDb();
+  return db.brand.findMany({ orderBy: { name: "asc" } });
 }
 
 export async function getCategoriesForGender(gender: Gender) {
-  return prisma.category.findMany({ where: { gender }, orderBy: { name: "asc" } });
+  const db = await getTenantDb();
+  return db.category.findMany({ where: { gender }, orderBy: { name: "asc" } });
 }
 
 export async function getAllCategories() {
-  return prisma.category.findMany({ orderBy: [{ gender: "asc" }, { name: "asc" }] });
+  const db = await getTenantDb();
+  return db.category.findMany({ orderBy: [{ gender: "asc" }, { name: "asc" }] });
 }
 
 export async function getFabricMaterials() {
-  return prisma.fabricMaterial.findMany({ orderBy: { name: "asc" } });
+  const db = await getTenantDb();
+  return db.fabricMaterial.findMany({ orderBy: { name: "asc" } });
 }
 
 export async function getMannequinsForGender(gender: Gender) {
-  return prisma.mannequin.findMany({ where: { gender, isActive: true } });
+  const db = await getTenantDb();
+  return db.mannequin.findMany({ where: { gender, isActive: true } });
 }

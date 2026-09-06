@@ -1,9 +1,10 @@
 import "server-only";
-import { prisma } from "@/lib/db";
+import { getTenantDb } from "@/lib/db";
 import { parseModelSource } from "@/components/3d/types";
 
 export async function listGarmentAssets() {
-  return prisma.garmentAsset.findMany({
+  const db = await getTenantDb();
+  return db.garmentAsset.findMany({
     include: {
       product: { select: { id: true, name: true, slug: true, gender: true, fit: true, publish3D: true } },
       fabricMaterial: { select: { name: true } },
@@ -13,7 +14,8 @@ export async function listGarmentAssets() {
 }
 
 export async function listProductsWithGarmentAsset() {
-  return prisma.product.findMany({
+  const db = await getTenantDb();
+  return db.product.findMany({
     where: { garmentAsset: { isNot: null } },
     select: { id: true, name: true, gender: true },
     orderBy: { name: "asc" },
@@ -22,7 +24,8 @@ export async function listProductsWithGarmentAsset() {
 
 /** Shapes a product's data into exactly the props <GarmentViewerLoader> needs for a live preview. */
 export async function getGarmentPreviewProps(productId: string) {
-  const product = await prisma.product.findUnique({
+  const db = await getTenantDb();
+  const product = await db.product.findUnique({
     where: { id: productId },
     include: {
       colors: true,

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { prisma } from "@/lib/db";
+import { getTenantDb } from "@/lib/db";
+import { getTenantId } from "@/lib/tenant/context";
 import { randomUUID } from "crypto";
 
 const bodySchema = z.object({
@@ -23,8 +24,10 @@ export async function POST(request: Request) {
   }
 
   try {
-    await prisma.threeDViewEvent.create({
+    const [db, tenantId] = await Promise.all([getTenantDb(), getTenantId()]);
+    await db.threeDViewEvent.create({
       data: {
+        tenantId,
         productId: parsed.data.productId,
         action: parsed.data.action,
         sessionId: parsed.data.sessionId ?? randomUUID(),

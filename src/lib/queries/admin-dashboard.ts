@@ -1,5 +1,5 @@
 import "server-only";
-import { prisma } from "@/lib/db";
+import { getTenantDb } from "@/lib/db";
 
 const NON_REVENUE_STATUSES = ["CANCELLED", "REFUNDED"] as const;
 const LOW_STOCK_LIMIT = 10;
@@ -14,15 +14,18 @@ export interface DashboardStats {
 }
 
 export async function getDashboardStats(): Promise<DashboardStats> {
+  const db = await getTenantDb();
+  // User is platform-global (no tenantId), so "customers of this tenant" is
+  // counted via TenantMembership rather than db.user.count().
   const [revenueAgg, orderCount, customerCount, productCount, firstOrder] = await Promise.all([
-    prisma.order.aggregate({
+    db.order.aggregate({
       _sum: { grandTotal: true },
       where: { status: { notIn: [...NON_REVENUE_STATUSES] } },
     }),
-    prisma.order.count(),
-    prisma.user.count({ where: { role: "CUSTOMER" } }),
-    prisma.product.count(),
-    prisma.order.findFirst({ select: { currency: true } }),
+    db.order.count(),
+    db.tenantMembership.count({ where: { role: "CUSTOMER" } }),
+    db.product.count(),
+    db.order.findFirst({ select: { currency: true } }),
   ]);
 
   return {
@@ -52,7 +55,8 @@ export interface LowStockVariant {
  * variant count grows large enough to matter.
  */
 export async function getLowStockVariants(limit = LOW_STOCK_LIMIT): Promise<LowStockVariant[]> {
-  const variants = await prisma.productVariant.findMany({
+  const db = await getTenantDb();
+  const variants = await db.productVariant.findMany({
     where: { isActive: true },
     select: {
       id: true,
@@ -88,7 +92,8 @@ export interface ProductViewStat {
 }
 
 export async function getMostViewedProducts(limit = TOP_PRODUCTS_LIMIT): Promise<ProductViewStat[]> {
-  const grouped = await prisma.analyticsEvent.groupBy({
+  const db = await getTenantDb();
+  const grouped = await db.analyticsEvent.groupBy({
     by: ["productId"],
     where: { type: "PRODUCT_VIEW", productId: { not: null } },
     _count: { productId: true },
@@ -100,7 +105,8 @@ export async function getMostViewedProducts(limit = TOP_PRODUCTS_LIMIT): Promise
 }
 
 export async function getMost3DSimulatedProducts(limit = TOP_PRODUCTS_LIMIT): Promise<ProductViewStat[]> {
-  const grouped = await prisma.threeDViewEvent.groupBy({
+  const db = await getTenantDb();
+  const grouped = await db.threeDViewEvent.groupBy({
     by: ["productId"],
     _count: { productId: true },
     orderBy: { _count: { productId: "desc" } },
@@ -118,7 +124,8 @@ async function resolveProductNames(
   const ids = grouped.map((g) => g.productId).filter((id): id is string => Boolean(id));
   if (ids.length === 0) return [];
 
-  const products = await prisma.product.findMany({
+  const db = await getTenantDb();
+  const products = await db.product.findMany({
     where: { id: { in: ids } },
     select: { id: true, name: true },
   });
@@ -140,7 +147,8 @@ export interface CategorySales {
 }
 
 export async function getSalesByCategory(): Promise<CategorySales[]> {
-  const items = await prisma.orderItem.findMany({
+  const db = await getTenantDb();
+  const items = await db.orderItem.findMany({
     where: { order: { status: { notIn: [...NON_REVENUE_STATUSES] } } },
     select: {
       quantity: true,

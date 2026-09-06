@@ -1,7 +1,7 @@
 import "server-only";
-import { prisma } from "@/lib/db";
+import { getTenantDb } from "@/lib/db";
+import type { TenantDb } from "@/lib/db/tenant-client";
 import type { CartWithItems } from "@/lib/cart";
-import type { Prisma } from "@/generated/prisma/client";
 
 export interface ShippingResolution {
   amount: number;
@@ -18,9 +18,10 @@ export interface ShippingResolution {
  */
 export async function resolveShippingTotal(
   country: string,
-  db: Prisma.TransactionClient | typeof prisma = prisma,
+  db?: Pick<TenantDb, "shippingZone">,
 ): Promise<ShippingResolution> {
-  const zones = await db.shippingZone.findMany();
+  const client = db ?? (await getTenantDb());
+  const zones = await client.shippingZone.findMany();
   if (zones.length === 0) {
     throw new Error("No shipping zones are configured.");
   }

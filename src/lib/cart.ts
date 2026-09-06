@@ -2,7 +2,8 @@ import "server-only";
 import { cache } from "react";
 import { cookies } from "next/headers";
 import { randomUUID } from "crypto";
-import { prisma } from "@/lib/db";
+import { getTenantDb } from "@/lib/db";
+import { getTenantId } from "@/lib/tenant/context";
 import { auth } from "@/auth";
 
 const GUEST_CART_COOKIE = "onion3d_guest_cart";
@@ -47,12 +48,17 @@ export type CartWithItems = NonNullable<
  * create a cart in the same request.
  */
 export const getOrCreateCart = cache(async function getOrCreateCart() {
-  const session = await auth();
-  const cookieStore = await cookies();
+  const [session, cookieStore, db, tenantId] = await Promise.all([
+    auth(),
+    cookies(),
+    getTenantDb(),
+    getTenantId(),
+  ]);
 
   if (session?.user?.id) {
-    const existing = await prisma.cart.findUnique({
-      where: { userId: session.user.id },
+    const userId = session.user.id;
+    const existing = await db.cart.findUnique({
+      where: { tenantId_userId: { tenantId, userId } },
       include: cartInclude,
     });
     if (existing) return existing;
@@ -60,18 +66,18 @@ export const getOrCreateCart = cache(async function getOrCreateCart() {
     // A guest cart from before sign-in gets adopted rather than discarded.
     const guestId = cookieStore.get(GUEST_CART_COOKIE)?.value;
     if (guestId) {
-      const guestCart = await prisma.cart.findUnique({ where: { guestId } });
+      const guestCart = await db.cart.findUnique({ where: { tenantId_guestId: { tenantId, guestId } } });
       if (guestCart) {
-        return prisma.cart.update({
+        return db.cart.update({
           where: { id: guestCart.id },
-          data: { userId: session.user.id, guestId: null },
+          data: { userId, guestId: null },
           include: cartInclude,
         });
       }
     }
 
-    return prisma.cart.create({
-      data: { userId: session.user.id },
+    return db.cart.create({
+      data: { tenantId, userId },
       include: cartInclude,
     });
   }
@@ -83,14 +89,14 @@ export const getOrCreateCart = cache(async function getOrCreateCart() {
   // that bypassed the proxy matcher.
   const guestId = cookieStore.get(GUEST_CART_COOKIE)?.value ?? randomUUID();
 
-  const existing = await prisma.cart.findUnique({
-    where: { guestId },
+  const existing = await db.cart.findUnique({
+    where: { tenantId_guestId: { tenantId, guestId } },
     include: cartInclude,
   });
   if (existing) return existing;
 
-  return prisma.cart.create({
-    data: { guestId },
+  return db.cart.create({
+    data: { tenantId, guestId },
     include: cartInclude,
   });
 });
@@ -103,7 +109,8 @@ export async function getCartSummary() {
 
 /** Server-side price resolution — never trust a client-submitted price. */
 export async function addToCart(productVariantId: string, quantity: number) {
-  const variant = await prisma.productVariant.findUnique({
+  const [db, tenantId] = await Promise.all([getTenantDb(), getTenantId()]);
+  const variant = await db.productVariant.findUnique({
     where: { id: productVariantId },
     select: { productId: true, stockQuantity: true, isActive: true },
   });
@@ -125,13 +132,14 @@ export async function addToCart(productVariantId: string, quantity: number) {
   }
 
   if (existing) {
-    await prisma.cartItem.update({
+    await db.cartItem.update({
       where: { id: existing.id },
       data: { quantity: nextQuantity },
     });
   } else {
-    await prisma.cartItem.create({
+    await db.cartItem.create({
       data: {
+        tenantId,
         cartId: cart.id,
         productId: variant.productId,
         productVariantId,
@@ -142,21 +150,23 @@ export async function addToCart(productVariantId: string, quantity: number) {
 }
 
 export async function updateCartItemQuantity(itemId: string, quantity: number) {
+  const db = await getTenantDb();
   if (quantity <= 0) {
-    await prisma.cartItem.delete({ where: { id: itemId } });
+    await db.cartItem.delete({ where: { id: itemId } });
     return;
   }
-  const item = await prisma.cartItem.findUnique({
+  const item = await db.cartItem.findUnique({
     where: { id: itemId },
     include: { productVariant: { select: { stockQuantity: true } } },
   });
   if (!item) return;
-  await prisma.cartItem.update({
+  await db.cartItem.update({
     where: { id: itemId },
     data: { quantity: Math.min(quantity, item.productVariant.stockQuantity) },
   });
 }
 
 export async function removeCartItem(itemId: string) {
-  await prisma.cartItem.delete({ where: { id: itemId } });
+  const db = await getTenantDb();
+  await db.cartItem.delete({ where: { id: itemId } });
 }

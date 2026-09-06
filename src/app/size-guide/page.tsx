@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { ContentPage } from "@/components/layout/content-page";
-import { prisma } from "@/lib/db";
+import { getTenantDb } from "@/lib/db";
 
 export const metadata: Metadata = {
   title: "Size Guide",
@@ -10,7 +10,8 @@ export const metadata: Metadata = {
 const SIZE_ORDER = ["XS", "S", "M", "L", "XL", "XXL", "XXXL"];
 
 export default async function SizeGuidePage() {
-  const mannequins = await prisma.mannequin.findMany({
+  const db = await getTenantDb();
+  const mannequins = await db.mannequin.findMany({
     where: { bodyType: "standard" },
     orderBy: { heightCm: "asc" },
   });

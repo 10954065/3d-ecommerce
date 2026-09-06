@@ -1,5 +1,5 @@
 import "server-only";
-import { prisma } from "@/lib/db";
+import { getTenantDb } from "@/lib/db";
 import type { OrderStatus } from "@/generated/prisma/client";
 
 export const ORDERS_PAGE_SIZE = 20;
@@ -10,10 +10,11 @@ interface ListOrdersParams {
 }
 
 export async function listOrders({ status, page = 1 }: ListOrdersParams) {
+  const db = await getTenantDb();
   const where = status ? { status } : {};
 
   const [orders, total] = await Promise.all([
-    prisma.order.findMany({
+    db.order.findMany({
       where,
       select: {
         id: true,
@@ -29,7 +30,7 @@ export async function listOrders({ status, page = 1 }: ListOrdersParams) {
       skip: (page - 1) * ORDERS_PAGE_SIZE,
       take: ORDERS_PAGE_SIZE,
     }),
-    prisma.order.count({ where }),
+    db.order.count({ where }),
   ]);
 
   return {
@@ -51,7 +52,8 @@ export async function listOrders({ status, page = 1 }: ListOrdersParams) {
 }
 
 export async function getOrderById(id: string) {
-  return prisma.order.findUnique({
+  const db = await getTenantDb();
+  return db.order.findUnique({
     where: { id },
     include: {
       user: { select: { name: true, email: true } },

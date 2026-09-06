@@ -3,7 +3,8 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
-import { prisma } from "@/lib/db";
+import { getTenantDb } from "@/lib/db";
+import { getTenantId } from "@/lib/tenant/context";
 import { requireAdminSession, UNAUTHORIZED_ERROR } from "@/lib/admin-guard";
 import { slugify } from "@/lib/slugify";
 
@@ -74,8 +75,10 @@ export async function createProductAction(
 
   let createdId: string;
   try {
-    const created = await prisma.product.create({
+    const [db, tenantId] = await Promise.all([getTenantDb(), getTenantId()]);
+    const created = await db.product.create({
       data: {
+        tenantId,
         ...parsed.data,
         compareAtPrice: parsed.data.compareAtPrice ?? null,
       },
@@ -103,7 +106,8 @@ export async function updateProductAction(
   }
 
   try {
-    await prisma.product.update({
+    const db = await getTenantDb();
+    await db.product.update({
       where: { id: productId },
       data: {
         ...parsed.data,

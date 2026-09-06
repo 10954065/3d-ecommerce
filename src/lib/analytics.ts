@@ -1,5 +1,6 @@
 import "server-only";
-import { prisma } from "@/lib/db";
+import { getTenantDb } from "@/lib/db";
+import { getTenantId } from "@/lib/tenant/context";
 import { auth } from "@/auth";
 import type { Prisma } from "@/generated/prisma/client";
 
@@ -36,9 +37,10 @@ export async function logAnalyticsEvent({
   metadata,
 }: LogAnalyticsEventParams): Promise<void> {
   try {
-    const session = await auth();
-    await prisma.analyticsEvent.create({
+    const [session, db, tenantId] = await Promise.all([auth(), getTenantDb(), getTenantId()]);
+    await db.analyticsEvent.create({
       data: {
+        tenantId,
         type,
         productId,
         sessionId,

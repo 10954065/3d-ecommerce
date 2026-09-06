@@ -26,13 +26,38 @@ function slugify(value: string): string {
     .replace(/(^-|-$)/g, "");
 }
 
-async function seedFabrics() {
+const DEFAULT_TENANT_SLUG = "forme";
+
+async function seedDefaultTenant() {
+  const tenant = await prisma.tenant.upsert({
+    where: { slug: DEFAULT_TENANT_SLUG },
+    update: {},
+    create: {
+      slug: DEFAULT_TENANT_SLUG,
+      name: "Forme",
+    },
+  });
+
+  const devHosts = ["localhost:3000", "localhost:3001"];
+  for (const host of devHosts) {
+    await prisma.tenantDomain.upsert({
+      where: { host },
+      update: { tenantId: tenant.id },
+      create: { tenantId: tenant.id, host, isPrimary: host === "localhost:3001" },
+    });
+  }
+
+  console.log(`Seeded default tenant "${tenant.slug}" with domains: ${devHosts.join(", ")}`);
+  return tenant;
+}
+
+async function seedFabrics(tenantId: string) {
   const map = new Map<string, string>();
   for (const preset of FABRIC_PRESETS) {
     const fabric = await prisma.fabricMaterial.upsert({
-      where: { name: preset.name },
+      where: { tenantId_name: { tenantId, name: preset.name } },
       update: preset,
-      create: preset,
+      create: { ...preset, tenantId },
     });
     map.set(preset.name, fabric.id);
   }
@@ -40,7 +65,7 @@ async function seedFabrics() {
   return map;
 }
 
-async function seedMannequins() {
+async function seedMannequins(tenantId: string) {
   const map = new Map<string, string>();
   for (const [gender, measurements] of [
     ["MEN", MEN_MEASUREMENTS],
@@ -49,7 +74,7 @@ async function seedMannequins() {
     for (const m of measurements) {
       const mannequin = await prisma.mannequin.upsert({
         where: {
-          gender_size_bodyType: { gender, size: m.size, bodyType: "standard" },
+          tenantId_gender_size_bodyType: { tenantId, gender, size: m.size, bodyType: "standard" },
         },
         update: {
           heightCm: m.heightCm,
@@ -63,6 +88,7 @@ async function seedMannequins() {
           thighCm: m.thighCm,
         },
         create: {
+          tenantId,
           gender,
           size: m.size,
           bodyType: "standard",
@@ -85,14 +111,14 @@ async function seedMannequins() {
   return map;
 }
 
-async function seedBrands() {
+async function seedBrands(tenantId: string) {
   const names = ["Forme Atelier", "Forme Sport"];
   const map = new Map<string, string>();
   for (const name of names) {
     const brand = await prisma.brand.upsert({
-      where: { name },
+      where: { tenantId_name: { tenantId, name } },
       update: {},
-      create: { name, slug: slugify(name) },
+      create: { tenantId, name, slug: slugify(name) },
     });
     map.set(name, brand.id);
   }
@@ -100,7 +126,7 @@ async function seedBrands() {
   return map;
 }
 
-async function seedCategories(products: SeedProduct[]) {
+async function seedCategories(tenantId: string, products: SeedProduct[]) {
   const map = new Map<string, string>();
   const seen = new Set<string>();
   for (const product of products) {
@@ -110,9 +136,10 @@ async function seedCategories(products: SeedProduct[]) {
 
     const slug = `${product.gender.toLowerCase()}-${product.categorySlug}`;
     const category = await prisma.category.upsert({
-      where: { slug },
+      where: { tenantId_slug: { tenantId, slug } },
       update: {},
       create: {
+        tenantId,
         name: titleCase(product.categorySlug),
         slug,
         gender: product.gender as Gender,
@@ -131,7 +158,7 @@ function titleCase(slug: string): string {
     .join(" ");
 }
 
-async function seedCollections() {
+async function seedCollections(tenantId: string) {
   const collections = [
     { name: "New Arrivals", slug: "new-arrivals", isFeatured: true },
     { name: "The Essentials", slug: "the-essentials", isFeatured: true },
@@ -139,9 +166,9 @@ async function seedCollections() {
   const map = new Map<string, string>();
   for (const c of collections) {
     const collection = await prisma.collection.upsert({
-      where: { slug: c.slug },
+      where: { tenantId_slug: { tenantId, slug: c.slug } },
       update: {},
-      create: c,
+      create: { ...c, tenantId },
     });
     map.set(c.slug, collection.id);
   }
@@ -150,6 +177,7 @@ async function seedCollections() {
 }
 
 async function seedProduct(
+  tenantId: string,
   product: SeedProduct,
   index: number,
   fabricMap: Map<string, string>,
@@ -165,9 +193,10 @@ async function seedProduct(
   const fabricMaterialId = fabricMap.get(product.fabric)!;
 
   const created = await prisma.product.upsert({
-    where: { slug },
+    where: { tenantId_slug: { tenantId, slug } },
     update: {},
     create: {
+      tenantId,
       brandId,
       categoryId,
       name: product.name,
@@ -192,6 +221,7 @@ async function seedProduct(
       where: { productId_name: { productId: created.id, name: color.name } },
       update: { hexCode: color.hex },
       create: {
+        tenantId,
         productId: created.id,
         name: color.name,
         hexCode: color.hex,
@@ -201,6 +231,7 @@ async function seedProduct(
 
     await prisma.productMedia.create({
       data: {
+        tenantId,
         productId: created.id,
         type: "IMAGE",
         url: placeholderProductImage({
@@ -218,9 +249,10 @@ async function seedProduct(
       const variantSku = `${sku}-${slugify(color.name)}-${size}`;
       const stockQuantity = 8 + Math.floor(Math.random() * 32);
       await prisma.productVariant.upsert({
-        where: { sku: variantSku },
+        where: { tenantId_sku: { tenantId, sku: variantSku } },
         update: { stockQuantity },
         create: {
+          tenantId,
           productId: created.id,
           colorId: productColor.id,
           size: size as SizeLabel,
@@ -235,6 +267,7 @@ async function seedProduct(
     where: { productId: created.id },
     update: { fabricMaterialId },
     create: {
+      tenantId,
       productId: created.id,
       fabricMaterialId,
       baseModelUrl: `procedural:${product.archetype}`,
@@ -252,6 +285,7 @@ async function seedProduct(
       },
       update: {},
       create: {
+        tenantId,
         garmentAssetId: garmentAsset.id,
         mannequinId,
         morphTargetKey: size,
@@ -264,6 +298,7 @@ async function seedProduct(
       where: { garmentAssetId_clip: { garmentAssetId: garmentAsset.id, clip: clip.clip } },
       update: {},
       create: {
+        tenantId,
         garmentAssetId: garmentAsset.id,
         clip: clip.clip,
         durationMs: clip.durationMs,
@@ -274,12 +309,13 @@ async function seedProduct(
   return created;
 }
 
-async function seedShippingZones() {
+async function seedShippingZones(tenantId: string) {
   await prisma.shippingZone.upsert({
     where: { id: "ghana-domestic" },
     update: {},
     create: {
       id: "ghana-domestic",
+      tenantId,
       name: "Ghana (Domestic)",
       countries: ["GH"],
       flatRate: 30,
@@ -291,6 +327,7 @@ async function seedShippingZones() {
     update: {},
     create: {
       id: "international",
+      tenantId,
       name: "International",
       countries: ["US", "GB", "NG", "CA", "FR", "DE"],
       flatRate: 250,
@@ -300,7 +337,7 @@ async function seedShippingZones() {
   console.log("Seeded shipping zones");
 }
 
-async function seedUsers() {
+async function seedUsers(tenantId: string) {
   const adminPassword = await bcrypt.hash("Admin123!", 10);
   const customerPassword = await bcrypt.hash("Customer123!", 10);
 
@@ -326,11 +363,23 @@ async function seedUsers() {
     },
   });
 
+  await prisma.tenantMembership.upsert({
+    where: { tenantId_userId: { tenantId, userId: admin.id } },
+    update: {},
+    create: { tenantId, userId: admin.id, role: "TENANT_ADMIN" },
+  });
+  await prisma.tenantMembership.upsert({
+    where: { tenantId_userId: { tenantId, userId: customer.id } },
+    update: {},
+    create: { tenantId, userId: customer.id, role: "CUSTOMER" },
+  });
+
   await prisma.address.upsert({
     where: { id: "demo-customer-address" },
     update: {},
     create: {
       id: "demo-customer-address",
+      tenantId,
       userId: customer.id,
       label: "Home",
       fullName: "Demo Customer",
@@ -347,19 +396,22 @@ async function seedUsers() {
 }
 
 async function main() {
-  const fabricMap = await seedFabrics();
-  const mannequinMap = await seedMannequins();
-  const brandMap = await seedBrands();
+  const tenant = await seedDefaultTenant();
+  const tenantId = tenant.id;
+  const fabricMap = await seedFabrics(tenantId);
+  const mannequinMap = await seedMannequins(tenantId);
+  const brandMap = await seedBrands(tenantId);
   const allProducts = [...MEN_PRODUCTS, ...WOMEN_PRODUCTS];
-  const categoryMap = await seedCategories(allProducts);
-  const collectionMap = await seedCollections();
-  await seedShippingZones();
-  await seedUsers();
+  const categoryMap = await seedCategories(tenantId, allProducts);
+  const collectionMap = await seedCollections(tenantId);
+  await seedShippingZones(tenantId);
+  await seedUsers(tenantId);
 
   let count = 0;
   for (const product of allProducts) {
     const collectionSlug = count % 5 === 0 ? "new-arrivals" : "the-essentials";
     await seedProduct(
+      tenantId,
       product,
       count,
       fabricMap,

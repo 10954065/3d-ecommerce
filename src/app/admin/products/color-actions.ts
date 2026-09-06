@@ -2,7 +2,8 @@
 
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
-import { prisma } from "@/lib/db";
+import { getTenantDb } from "@/lib/db";
+import { getTenantId } from "@/lib/tenant/context";
 import { requireAdminSession, UNAUTHORIZED_ERROR } from "@/lib/admin-guard";
 
 export interface ActionResult {
@@ -34,8 +35,9 @@ export async function createColorAction(
   }
 
   try {
-    await prisma.productColor.create({
-      data: { productId, name: parsed.data.name, hexCode: parsed.data.hexCode },
+    const [db, tenantId] = await Promise.all([getTenantDb(), getTenantId()]);
+    await db.productColor.create({
+      data: { tenantId, productId, name: parsed.data.name, hexCode: parsed.data.hexCode },
     });
   } catch (error) {
     return { success: false, error: describeError(error, "A color with that name already exists.") };
@@ -62,7 +64,8 @@ export async function updateColorAction(
   }
 
   try {
-    await prisma.productColor.update({
+    const db = await getTenantDb();
+    await db.productColor.update({
       where: { id: colorId },
       data: { name: parsed.data.name, hexCode: parsed.data.hexCode },
     });
@@ -80,7 +83,8 @@ export async function deleteColorAction(productId: string, colorId: string): Pro
 
   try {
     // Cascades to ProductVariant rows via the schema's onDelete: Cascade.
-    await prisma.productColor.delete({ where: { id: colorId } });
+    const db = await getTenantDb();
+    await db.productColor.delete({ where: { id: colorId } });
   } catch (error) {
     return { success: false, error: error instanceof Error ? error.message : "Could not delete color." };
   }

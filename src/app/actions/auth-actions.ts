@@ -4,7 +4,8 @@ import { z } from "zod";
 import bcrypt from "bcryptjs";
 import { AuthError } from "next-auth";
 import { auth, signIn, signOut } from "@/auth";
-import { prisma } from "@/lib/db";
+import { prismaUnsafe } from "@/lib/db";
+import { getTenantId } from "@/lib/tenant/context";
 
 const BCRYPT_ROUNDS = 10;
 
@@ -82,14 +83,18 @@ export async function signUpAction(
 
   const { name, email, password } = parsed.data;
 
-  const existing = await prisma.user.findUnique({ where: { email } });
+  const existing = await prismaUnsafe.user.findUnique({ where: { email } });
   if (existing) {
     return { error: "An account with this email already exists." };
   }
 
+  const tenantId = await getTenantId();
   const passwordHash = await bcrypt.hash(password, BCRYPT_ROUNDS);
-  await prisma.user.create({
+  const created = await prismaUnsafe.user.create({
     data: { name, email, passwordHash, role: "CUSTOMER" },
+  });
+  await prismaUnsafe.tenantMembership.create({
+    data: { tenantId, userId: created.id, role: "CUSTOMER" },
   });
 
   const callbackUrl = readCallbackUrl(formData);
