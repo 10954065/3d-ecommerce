@@ -1,4 +1,4 @@
-# Mannequin engine — Phase 1
+# Mannequin engine — Phase 1 & 2
 
 The mannequin/body system was rebuilt from scratch. This document covers what's
 built, why it's built this way, and what's intentionally deferred. See
@@ -119,6 +119,69 @@ turned-out feet on top of that bind pose. Revisit this decision if Phase 3
 imports an external animation clip that assumes a T-pose rest pose to
 retarget against.
 
+## Size morphing (Phase 2)
+
+`src/components/3d/mannequin/MannequinMorphs.ts` — `buildMorphTargets()`
+produces all 10 requested morph axes (height, shoulderWidth, chest, bust,
+waist, hip, thigh, armVolume, legLength, torsoLength) by **re-running the
+entire builder once per axis**, perturbing one parameter at a time off the
+base measurements, and storing the resulting position delta. This only works
+because the loft's topology (ring/vertex count and order) is a pure function
+of the profile definition, never of the measurement values — confirmed by a
+hard vertex-count-mismatch check in `buildMorphTargets()` itself, and by the
+Vitest suite. Two kinds of axis exist:
+
+- **Measurement-backed axes** (height, shoulderWidth, chest, waist, hip,
+  thigh, legLength) perturb one `MannequinMeasurements` field directly. The
+  same delta is reused to *solve* size → weight
+  (`resolveSizeMorphWeights()`): `weight = (targetSize[field] -
+  reference[field]) / delta`.
+- **Proportion-backed axes** (bust, armVolume, torsoLength) have no single
+  circumference to perturb, so they go through
+  `MannequinBuilder.ts`'s `MannequinMorphOverrides` instead — bust perturbs
+  the chest landmark's `frontBulge` (prominence independent of chest
+  circumference), armVolume perturbs `GenderProportions.armVolume` (bicep/
+  forearm thickness), torsoLength perturbs a `torsoLengthScale` factor that
+  stretches only the pelvis-to-shoulder span in `buildTorsoChain()` (neck/head
+  spacing stays fixed — lengthening those would look wrong).
+
+Geometry is set up with `geometry.morphTargetsRelative = true` and one
+`BufferAttribute` per axis in `geometry.morphAttributes.position` (built once,
+inside the same expensive `useMemo` as the base mesh in `Mannequin.tsx`).
+Applying a weight is a **separate, cheap `useEffect`** that just writes numbers
+into the already-allocated `mesh.morphTargetInfluences` array — changing size
+or body shape never rebuilds geometry.
+
+**Sizes (XS–XXXL)** are weight presets, not new meshes — solved from the
+M-reference measurements via `resolveSizeMorphWeights()`. **Body-shape
+presets** (Slim/Regular/Athletic/Curvy/Plus/Tall/Petite/Custom,
+`BODY_SHAPE_WEIGHTS`) are named weight vectors across all 10 axes, summed with
+the size weights via `combineMorphWeights()` (clamped to ±1.6 so extrapolation
+stays plausible — "Custom" exposes the raw sliders with no preset nudge).
+
+**Known approximation**: summing independent single-axis linear morphs is not
+exact — accuracy degrades furthest from the M reference (XS, XXXL). No
+acceptance-gate test compares morph-blended output against a literal
+re-loft at the target measurements yet; the Vitest suite only checks
+direction (XS negative, XXXL positive) and that each axis actually displaces
+vertices. Revisit if extreme sizes look visibly off once real garments are
+fitted against them in Phase 3.
+
+## Collision proxy (Phase 2)
+
+`src/components/3d/mannequin/MannequinCollision.ts` — `buildCollisionProxy()`
+builds one capsule (or, for hands, one sphere) per body region, rigidly
+positioned from the same bone world positions the visible mesh uses. This is
+the industry-standard technique for body/cloth collision (Marvelous Designer,
+CLO3D, and every game-engine ragdoll use capsule/sphere chains, not a second
+detailed mesh) — deliberately not a lower-poly second loft. Radii are rough
+measurement-derived approximations (not re-derived from the visible surface),
+since a collision volume only needs to roughly contain the body. Stays under
+~1k triangles total, well inside the 5k–20k collision budget. Rendered as a
+wireframe overlay behind `Mannequin`'s `showCollisionDebug` prop (QA-only, off
+by default) — not consumed by anything yet, since there's no cloth
+simulation until Phase 4.
+
 ## Materials
 
 `src/components/3d/mannequin/MannequinMaterials.ts` — `createMannequinMaterial()`
@@ -138,18 +201,17 @@ entire integration — no rendering code changes required.
 
 ## What's NOT built yet (deferred phases)
 
-This is Phase 1 only — silhouette, professional appearance, correct
-proportions, clean topology (the first four items in the brief's own 10-item
-priority order). Per that same priority order, do not start the following
-until Phase 1 is visually signed off:
+Phases 1 and 2 are done — silhouette, professional appearance, correct
+proportions, clean topology, size morphing, and a collision proxy (the first
+six items in the brief's own 10-item priority order). Not yet done from
+Phase 2's original scope: closing the `Product.gender`/`Mannequin.gender`
+plumbing gap (never threaded through `ProductExperience` → `GarmentViewer`
+today) — deferred to Phase 3 below, since it only matters once `GarmentViewer`
+needs to pick a mesh, and doing it in isolation now would have nothing to
+wire it to.
 
-- **Phase 2**: size morphing (10 morph targets — height, shoulderWidth, chest,
-  bust, waist, hip, thigh, armVolume, legLength, torsoLength — mapped to
-  XS–XXXL and to named body-shape presets), a collision proxy
-  (`THREE.CapsuleGeometry` per bone, not a second loft — see risk notes
-  below), and closing the `Product.gender`/`Mannequin.gender` plumbing gap
-  (never threaded through `ProductExperience` → `GarmentViewer` today).
-- **Phase 3**: real skeletal animation clips, cutting `GarmentViewer` /
+- **Phase 3**: closing the `Product.gender`/`Mannequin.gender` plumbing gap,
+  real skeletal animation clips, cutting `GarmentViewer` /
   `product-experience` / `HeroMannequin` over to this engine (today only
   `HeroMannequin.tsx` uses it — the PDP viewer still uses the old primitive
   system, deliberately untouched to avoid regression risk), rebuilding

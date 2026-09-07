@@ -57,4 +57,6 @@ export interface MannequinHandle {
   group: import("three").Group | null;
   skeleton: import("three").Skeleton | null;
   bones: Partial<Record<BoneName, import("three").Bone>>;
+  /** The rigid capsule/sphere collision proxy — see MannequinCollision.ts. Null for a "gltf" source until it carries its own collision data. */
+  collisionProxy: import("three").Group | null;
 }

@@ -87,8 +87,19 @@ export interface TorsoChainResult {
   headRadius: number;
 }
 
-/** Pelvis -> waist -> chest -> neck -> head, one continuous chain — no primitive seams. */
-export function buildTorsoChain(m: MannequinMeasurements, p: GenderProportions, legLength: number, ankleY: number): TorsoChainResult {
+/**
+ * Pelvis -> waist -> chest -> neck -> head, one continuous chain — no
+ * primitive seams. `torsoLengthScale` stretches only the pelvis-to-shoulder
+ * span (the "torsoLength" morph target) — neck/head spacing stays fixed
+ * since lengthening those would look wrong.
+ */
+export function buildTorsoChain(
+  m: MannequinMeasurements,
+  p: GenderProportions,
+  legLength: number,
+  ankleY: number,
+  torsoLengthScale = 1,
+): TorsoChainResult {
   const height = m.heightCm / 100;
   const hipY = ankleY + legLength;
   const hipR = effR(m.hipsCm);
@@ -99,11 +110,11 @@ export function buildTorsoChain(m: MannequinMeasurements, p: GenderProportions, 
   const shoulderHalfWidth = m.shoulderWidthCm / 100 / 2;
 
   const pelvisBottomY = hipY;
-  const hipY2 = pelvisBottomY + height * 0.02;
-  const waistY = hipY2 + height * 0.15;
-  const underbustY = waistY + height * 0.06;
-  const chestY = underbustY + height * 0.05;
-  const shoulderY = chestY + height * 0.045;
+  const hipY2 = pelvisBottomY + height * 0.02 * torsoLengthScale;
+  const waistY = hipY2 + height * 0.15 * torsoLengthScale;
+  const underbustY = waistY + height * 0.06 * torsoLengthScale;
+  const chestY = underbustY + height * 0.05 * torsoLengthScale;
+  const shoulderY = chestY + height * 0.045 * torsoLengthScale;
   const neckBaseY = shoulderY + height * 0.012;
   const neckTopY = neckBaseY + height * 0.035;
   const jawY = neckTopY + height * 0.02;

@@ -8,6 +8,7 @@ import {
   buildTorsoChain,
   FINGER_LAYOUT,
   getProportions,
+  type GenderProportions,
 } from "./geometry/body-chains";
 import { BONE_ORDER, FINGER_RADIAL_SEGMENTS, FINGER_RINGS_PER_SEGMENT, RADIAL_SEGMENTS, RINGS_PER_SEGMENT } from "./mannequinConfig";
 import type { BoneName, MannequinGender } from "./mannequinTypes";
@@ -21,6 +22,18 @@ const LEG_SPLAY = 0.025; // radians outward from vertical
 export interface MannequinBuild {
   geometry: THREE.BufferGeometry;
   boneWorldPositions: Record<BoneName, THREE.Vector3>;
+}
+
+/**
+ * Proportion-level (not measurement-level) overrides used by the morph-target
+ * builder (MannequinMorphs.ts) to isolate axes that don't map to one of the
+ * 9 tracked measurement fields — bust prominence, arm volume, and torso
+ * length are all shape parameters independent of any single circumference.
+ */
+export interface MannequinMorphOverrides {
+  armVolume?: number;
+  chestFrontBulge?: number;
+  torsoLengthScale?: number;
 }
 
 function smoothstep(edge0: number, edge1: number, x: number): number {
@@ -165,12 +178,21 @@ function concatParts(parts: AssembledPart[]): THREE.BufferGeometry {
  * five fingers) is out of scope without a DCC/retopology tool, and why
  * overlap reads as one coherent figure at normal viewing distance regardless.
  */
-export function buildMannequinGeometry(gender: MannequinGender, measurements: MannequinMeasurements): MannequinBuild {
-  const p = getProportions(gender);
+export function buildMannequinGeometry(
+  gender: MannequinGender,
+  measurements: MannequinMeasurements,
+  overrides?: MannequinMorphOverrides,
+): MannequinBuild {
+  const baseProportions = getProportions(gender);
+  const p: GenderProportions = {
+    ...baseProportions,
+    armVolume: overrides?.armVolume ?? baseProportions.armVolume,
+    chest: { ...baseProportions.chest, frontBulge: overrides?.chestFrontBulge ?? baseProportions.chest.frontBulge },
+  };
   const ankleY = (measurements.heightCm / 100) * 0.02;
   const legLength = measurements.inseamCm / 100;
 
-  const torso = buildTorsoChain(measurements, p, legLength, ankleY);
+  const torso = buildTorsoChain(measurements, p, legLength, ankleY, overrides?.torsoLengthScale ?? 1);
   const boneWorldPositions = {} as Record<BoneName, THREE.Vector3>;
   boneWorldPositions.Root = new THREE.Vector3(0, 0, 0);
   boneWorldPositions.Pelvis = new THREE.Vector3(0, yOf(torso.landmarks, "pelvisBottom"), 0);

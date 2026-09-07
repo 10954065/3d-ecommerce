@@ -1,14 +1,20 @@
 "use client";
 
-import { Suspense, useRef, useState } from "react";
+import { Suspense, useMemo, useRef, useState } from "react";
 import { Canvas } from "@react-three/fiber";
 import {
   Mannequin,
   DEFAULT_FEMALE_MEASUREMENTS,
   DEFAULT_MALE_MEASUREMENTS,
   MANNEQUIN_MATERIAL_PRESETS,
+  BODY_SHAPE_PRESETS,
+  BODY_SHAPE_WEIGHTS,
+  resolveSizeMorphWeights,
+  combineMorphWeights,
   type MannequinGender,
   type MannequinMaterialPresetId,
+  type BodyShapePreset,
+  type SizeLabel,
 } from "@/components/3d/mannequin";
 import { CameraRig, type CameraRigHandle, type CameraView } from "@/components/3d/scene/CameraRig";
 import { LightingRig } from "@/components/3d/scene/LightingRig";
@@ -18,15 +24,23 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 const CAMERA_VIEWS: CameraView[] = ["front", "three-quarter", "right", "back", "left"];
 const LIGHTING_PRESETS: LightingPreset[] = ["STUDIO", "DAYLIGHT", "WARM", "COOL", "RUNWAY", "OUTDOOR"];
 const MATERIAL_IDS = Object.keys(MANNEQUIN_MATERIAL_PRESETS) as MannequinMaterialPresetId[];
+const SIZES: SizeLabel[] = ["XS", "S", "M", "L", "XL", "XXL", "XXXL"];
 
 /** Internal QA surface for the Phase 1 mannequin engine — reuses the existing CameraRig/LightingRig unmodified. */
 export function MannequinEnginePreview() {
   const [gender, setGender] = useState<MannequinGender>("female");
   const [material, setMaterial] = useState<MannequinMaterialPresetId>("ivory");
   const [lighting, setLighting] = useState<LightingPreset>("STUDIO");
+  const [size, setSize] = useState<SizeLabel>("M");
+  const [shape, setShape] = useState<BodyShapePreset>("Regular");
+  const [showCollisionDebug, setShowCollisionDebug] = useState(false);
   const cameraRigRef = useRef<CameraRigHandle>(null);
 
   const measurements = gender === "female" ? DEFAULT_FEMALE_MEASUREMENTS : DEFAULT_MALE_MEASUREMENTS;
+  const morphWeights = useMemo(
+    () => combineMorphWeights(resolveSizeMorphWeights(gender, size), BODY_SHAPE_WEIGHTS[shape]),
+    [gender, size, shape],
+  );
 
   return (
     <div className="flex flex-col gap-4">
@@ -89,12 +103,51 @@ export function MannequinEnginePreview() {
         </div>
       </div>
 
+      <div className="flex flex-wrap items-center gap-3">
+        <Select value={size} onValueChange={(v) => setSize(v as SizeLabel)}>
+          <SelectTrigger className="w-24">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {SIZES.map((s) => (
+              <SelectItem key={s} value={s}>
+                {s}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+
+        <Select value={shape} onValueChange={(v) => setShape(v as BodyShapePreset)}>
+          <SelectTrigger className="w-36">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {BODY_SHAPE_PRESETS.map((preset) => (
+              <SelectItem key={preset} value={preset}>
+                {preset}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+
+        <label className="flex items-center gap-1.5 text-[11px] uppercase tracking-wide text-muted-foreground">
+          <input type="checkbox" checked={showCollisionDebug} onChange={(e) => setShowCollisionDebug(e.target.checked)} />
+          collision proxy
+        </label>
+      </div>
+
       <div className="aspect-4/5 w-full max-w-md overflow-hidden rounded-lg border border-border bg-[#F5F1EA]">
         <Canvas shadows dpr={[1, 2]} camera={{ position: [0, 0.9, 2.6], fov: 32 }} gl={{ antialias: true }}>
           <color attach="background" args={["#F5F1EA"]} />
           <Suspense fallback={null}>
             <LightingRig preset={lighting} />
-            <Mannequin gender={gender} measurements={measurements} material={material} />
+            <Mannequin
+              gender={gender}
+              measurements={measurements}
+              material={material}
+              morphWeights={morphWeights}
+              showCollisionDebug={showCollisionDebug}
+            />
             <CameraRig ref={cameraRigRef} fabricFocus={false} />
           </Suspense>
         </Canvas>
