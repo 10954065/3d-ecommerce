@@ -28,6 +28,7 @@ interface ProductExperienceProps {
   colors: { id: string; name: string; hexCode: string }[];
   sizeOptions: {
     size: string;
+    gender: "male" | "female";
     measurements: {
       heightCm: number;
       chestCm: number;

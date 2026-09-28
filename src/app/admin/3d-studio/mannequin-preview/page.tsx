@@ -8,9 +8,8 @@ export default function MannequinEnginePreviewPage() {
       <div>
         <h1 className="font-display text-2xl">Mannequin Engine Preview</h1>
         <p className="text-sm text-muted-foreground">
-          Internal QA view for the Phase 1 procedural mannequin engine (real skeleton, lofted
-          geometry, no primitives) — not linked from any customer-facing page yet. See
-          docs/MANNEQUIN_SYSTEM.md.
+          Internal QA view for the mannequin + garment engine (real skeleton, lofted geometry, no
+          primitives) that now also powers the live product page. See docs/MANNEQUIN_SYSTEM.md.
         </p>
       </div>
       <MannequinEnginePreviewLoader />

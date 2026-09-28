@@ -70,6 +70,8 @@ export async function getGarmentPreviewProps(productId: string) {
     colors: product.colors.map((c) => ({ id: c.id, name: c.name, hexCode: c.hexCode })),
     sizes: product.garmentAsset.garmentSizes.map((gs) => ({
       size: gs.mannequin.size,
+      // UNISEX mannequins default to the female mesh until a dedicated unisex body exists.
+      gender: gs.mannequin.gender === "MEN" ? ("male" as const) : ("female" as const),
       measurements: {
         heightCm: gs.mannequin.heightCm,
         chestCm: gs.mannequin.chestCm,

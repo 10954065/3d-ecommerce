@@ -27,3 +27,6 @@ export {
 } from "./MannequinMorphs";
 export { buildCollisionCapsuleSpecs, buildCollisionProxy, type CollisionCapsuleSpec } from "./MannequinCollision";
 export { Mannequin, type MannequinProps } from "./Mannequin";
+export { buildGarmentGeometry, type GarmentBuild } from "./GarmentBuilder";
+export { Garment, type GarmentProps } from "./Garment";
+export { useMannequinAnimation } from "./MannequinAnimation";

@@ -9,6 +9,7 @@ import { useReducedMotion } from "./hooks/useReducedMotion";
 import { useWebglSupport } from "./hooks/useWebglSupport";
 import { FallbackGallery } from "./FallbackGallery";
 import { FabricInfoPanel } from "./FabricInfoPanel";
+import type { MannequinGender } from "./mannequin";
 import type {
   AnimationClipName,
   FabricPhysicalProps,
@@ -21,6 +22,7 @@ import type {
 export interface GarmentViewerSizeOption {
   size: string;
   measurements: MannequinMeasurements;
+  gender: MannequinGender;
 }
 
 export interface GarmentViewerColorOption {
@@ -72,7 +74,9 @@ export function GarmentViewer(props: GarmentViewerProps) {
   const hasTrackedOpenRef = useRef(false);
 
   const selectedColor = colors.find((c) => c.id === colorId) ?? colors[0];
-  const selectedMeasurements = sizes.find((s) => s.size === size)?.measurements ?? sizes[0]?.measurements;
+  const selectedSize = sizes.find((s) => s.size === size) ?? sizes[0];
+  const selectedMeasurements = selectedSize?.measurements;
+  const selectedGender = selectedSize?.gender ?? "female";
 
   useEffect(() => {
     if (!hasTrackedOpenRef.current) {
@@ -136,6 +140,7 @@ export function GarmentViewer(props: GarmentViewerProps) {
       <Suspense fallback={<ViewerLoading />}>
         <Scene
           tier={tier}
+          gender={selectedGender}
           measurements={selectedMeasurements}
           garment={garment}
           clip={reducedMotion ? "IDLE" : clip}

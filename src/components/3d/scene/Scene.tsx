@@ -1,11 +1,11 @@
 "use client";
 
-import { useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Canvas } from "@react-three/fiber";
-import { MannequinFigure, type MannequinFigureHandle } from "./MannequinFigure";
+import * as THREE from "three";
+import { Mannequin, Garment, useMannequinAnimation, type MannequinGender, type MannequinHandle } from "../mannequin";
 import { LightingRig } from "./LightingRig";
 import { CameraRig, type CameraRigHandle, type CameraView } from "./CameraRig";
-import { useAnimationController } from "../hooks/useAnimationController";
 import { RENDER_SETTINGS } from "../hooks/usePerformanceTier";
 import type {
   AnimationClipName,
@@ -18,6 +18,7 @@ import type {
 } from "../types";
 
 interface SceneContentProps {
+  gender: MannequinGender;
   measurements: MannequinMeasurements;
   garment: { archetype: GarmentArchetype; fit: FitType; colorHex: string; fabric: FabricPhysicalProps } | null;
   clip: AnimationClipName;
@@ -26,14 +27,36 @@ interface SceneContentProps {
   cameraRigRef: React.Ref<CameraRigHandle>;
 }
 
-function SceneContent({ measurements, garment, clip, lighting, fabricFocus, cameraRigRef }: SceneContentProps) {
-  const figureRef = useRef<MannequinFigureHandle>(null);
-  const activityRef = useAnimationController(figureRef, clip);
+/**
+ * Rendered inside <Canvas> — useMannequinAnimation calls useFrame, which only
+ * works within the R3F render tree, so the mannequin+garment+animation wiring
+ * lives here rather than in the outer Scene component.
+ */
+function SceneContent({ gender, measurements, garment, clip, lighting, fabricFocus, cameraRigRef }: SceneContentProps) {
+  const mannequinRef = useRef<MannequinHandle>(null);
+  const [skeleton, setSkeleton] = useState<THREE.Skeleton | null>(null);
+  const activityRef = useMannequinAnimation(mannequinRef, clip);
+
+  useEffect(() => {
+    setSkeleton(mannequinRef.current?.skeleton ?? null);
+  }, [gender, measurements]);
 
   return (
     <>
       <LightingRig preset={lighting} />
-      <MannequinFigure ref={figureRef} measurements={measurements} garment={garment} activityRef={activityRef} />
+      <Mannequin ref={mannequinRef} gender={gender} measurements={measurements} />
+      {skeleton && garment && (
+        <Garment
+          gender={gender}
+          measurements={measurements}
+          archetype={garment.archetype}
+          fit={garment.fit}
+          colorHex={garment.colorHex}
+          fabric={garment.fabric}
+          skeleton={skeleton}
+          activityRef={activityRef}
+        />
+      )}
       <CameraRig ref={cameraRigRef} fabricFocus={fabricFocus} />
     </>
   );
@@ -52,6 +75,7 @@ export function Scene({ tier, ...content }: SceneProps) {
       dpr={settings.dpr}
       gl={{ antialias: settings.antialias, powerPreference: "high-performance" }}
       camera={{ position: [0, 0.9, 2.6], fov: 32 }}
+      onCreated={({ camera }) => camera.lookAt(0, 0.9, 0)}
     >
       <color attach="background" args={["#F5F1EA"]} />
       <SceneContent {...content} />

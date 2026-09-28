@@ -1,4 +1,4 @@
-# Mannequin engine — Phase 1 & 2
+# Mannequin engine — Phase 1, 2 & 3
 
 The mannequin/body system was rebuilt from scratch. This document covers what's
 built, why it's built this way, and what's intentionally deferred. See
@@ -182,6 +182,123 @@ wireframe overlay behind `Mannequin`'s `showCollisionDebug` prop (QA-only, off
 by default) — not consumed by anything yet, since there's no cloth
 simulation until Phase 4.
 
+## Garments as lofted shells sharing the body's skeleton (Phase 3)
+
+`src/components/3d/mannequin/geometry/body-frame.ts` — `computeBodyFrame()`
+factors the socket positions/directions (shoulder sockets, arm-lean
+direction, hip sockets, leg-splay direction) and per-chain bone breakpoints
+out of `MannequinBuilder.ts` into one shared function, so both the body and
+garments place/skin themselves identically. `geometry/skinned-loft.ts` holds
+the shared `buildPart()`/`concatParts()` skinning-and-assembly code (also
+factored out of `MannequinBuilder.ts`, behavior-preserving — see its tests).
+
+`src/components/3d/mannequin/GarmentBuilder.ts` — `buildGarmentGeometry()`
+builds each garment archetype as one or more shells **offset from the body's
+own landmark chains**, never re-authored from scratch:
+
+- **Torso shells** (tshirt/shirt/jacket/coat/jumpsuit/dress) crop the torso
+  chain from a bottom landmark up to `shoulderBase`, then scale every
+  landmark's half-width/depth by a fit-ease factor (`FIT_EASE`, the same
+  SLIM 1.04 / REGULAR 1.09 / RELAXED 1.16 / OVERSIZED 1.26 table the old
+  garment-builder used).
+- **Sleeve shells** crop the arm chain to a fraction of `armLengthCm` (a
+  t-shirt sleeve stops mid-bicep at 0.32; a coat sleeve runs to 0.98).
+- **Leg shells** (trousers/jumpsuit) crop the leg chain to a fraction of
+  `inseamCm`, measured up from the ankle.
+- **Flare shells** (coat hem, skirt, dress skirt) are the one part *not*
+  derived from a body chain — a small hand-authored waist→hem taper, rigidly
+  skinned 100% to `Pelvis` (a skirt hangs from the waist; it doesn't bend at
+  the knee).
+
+Every shell reuses the *exact* bone breakpoints (`torsoBreakpoints()` /
+`armBreakpoints()` / `legBreakpoints()` from `body-frame.ts`) the body part it
+wraps uses, so it deforms with the same bones during animation. `cropLandmarks()`
+inserts interpolated boundary points at the crop range's exact edges (not just
+the nearest existing landmark), which is what lets a sleeve stop mid-bicep
+instead of only at a body landmark. The whole garment — every shell —
+concatenates into **one `BufferGeometry`, one `SkinnedMesh`, one material**;
+there's no longer a separate mesh per body region.
+
+`src/components/3d/mannequin/Garment.tsx` — the React component. It does
+**not** own bones: `mesh.bind(skeleton)` binds to the body's own
+`THREE.Skeleton` instance (passed down from the body's `MannequinHandle`), so
+garment and body are two independent `SkinnedMesh`es reading the same live
+bone transforms every frame — exactly the "multiple `SkinnedMesh` on one
+`Skeleton`" mechanism `Mannequin.tsx`'s docs called out as the Phase 3 plan.
+Rebuilds only on gender/measurements/archetype/fit change; color/fabric swaps
+only rebuild the material.
+
+**Known limitation carried over from the body**: shells meet the body (and
+each other, at a torso/flare junction) by overlap, not welding — same
+tradeoff as the body's own limb joins. Visible as a step/seam line under some
+lighting angles (e.g. the coat's hem-extension seam) — cosmetic, not a
+skinning bug.
+
+**Garments do not use morph targets.** They rebuild fresh from whatever
+`measurements` object they're given (same as the old garment-builder), so a
+garment always matches the body's *actual* measurements for that size — which
+is exactly how the live PDP already worked (size selection swaps a full
+measurement set, not a morph weight). The Phase 2 morph-target system stays
+body-only; the admin preview's morph/size demo controls apply to the body
+only; garment fit in the admin preview always renders against the base (M)
+measurements regardless of the size dropdown, since that dropdown drives
+*body* morph weights, not `measurements` itself.
+
+## Real skeletal animation (Phase 3)
+
+`src/components/3d/mannequin/MannequinAnimation.ts` — `useMannequinAnimation()`
+replaces the old `useAnimationController`'s group-transform puppeteering with
+direct bone rotation: it mutates `Root`, `L_Shoulder`/`R_Shoulder`, and (for
+`WALK`) `L_UpperLeg`/`R_UpperLeg` on the *live skeleton* every frame. Because
+both the body and any garment `SkinnedMesh` read from that same skeleton,
+they animate together automatically — no per-mesh animation wiring needed.
+The six clip names (`IDLE`/`TURN_360`/`WALK`/`ARM_RAISE`/`WEIGHT_SHIFT`/
+`FABRIC_TEST`) and their motion feel match the old controller; `WALK` also
+now swings the legs, which the old group-based rig couldn't do. It never
+touches `Head`/`Foot` rotations or `Spine_02`'s presentation-pose offset, so
+`applyPresentationPose()`'s static stance persists underneath every clip.
+
+These are hand-authored procedural clips, not baked mocap — there's still no
+animated GLB asset. `useMannequinAnimation` is the natural seam to swap for a
+real `AnimationMixer`/`AnimationClip` once one exists; nothing about the
+skeleton or the clip-name API would need to change.
+
+**Note on the `react-hooks/immutability` lint rule**: `MannequinAnimation.ts`
+and `Garment.tsx` both carry a documented, scoped `eslint-disable` for this
+rule. It's part of `eslint-config-next`'s React Compiler rule set and flags
+mutating a `useMemo`/hook-derived value inside another hook's callback — but
+mutating live `Object3D`/`Bone` transforms and shader uniforms inside
+`useFrame` every frame is the standard, required react-three-fiber pattern
+(three.js's render loop runs outside React's render/memoization cycle, so it
+can't violate compiler memoization the way mutating actual React state
+would). The pre-existing `useAnimationController.ts` did the same thing
+without tripping the rule — apparently structurally sensitive to *how* the
+mutated object is reached (a `Partial<Record<BoneName, Bone>>` lookup vs. a
+plain interface property) — but the underlying pattern is identical.
+
+## Live PDP cutover (Phase 3)
+
+`GarmentViewer`/`Scene.tsx`/`product-experience.tsx` now render the real
+`Mannequin` + `Garment` engine instead of the old primitive system. The old
+files are deleted: `procedural/humanoid.ts`, `procedural/garment-builder.ts`,
+`scene/MannequinFigure.tsx`, `hooks/useAnimationController.ts`, and their
+tests (superseded by `GarmentBuilder.test.ts` and the existing mannequin
+suite). `GarmentViewer`'s public props/UI contract (colors, sizes, lighting,
+camera, motion/fabric buttons) is unchanged — this was a swap of what renders
+inside it, not a UI change.
+
+### Gender plumbing
+
+Closed the gap flagged in Phase 2: each `GarmentSize` already joins a
+`Mannequin` row, and `Mannequin.gender` (Prisma `Gender`: `MEN`/`WOMEN`/
+`UNISEX`) is mapped to `MannequinGender` (`"male"`/`"female"`) right where
+`sizeOptions`/`sizes` are built (`products/[slug]/page.tsx`,
+`admin-3d-studio.ts`) — `UNISEX` currently defaults to `"female"` pending a
+dedicated unisex body (a one-line change to revisit, not an architectural
+gap). `GarmentViewerSizeOption` carries `gender` per size, so switching sizes
+across a gender boundary (if a catalog ever mixes them under one product)
+picks the correct mesh automatically.
+
 ## Materials
 
 `src/components/3d/mannequin/MannequinMaterials.ts` — `createMannequinMaterial()`
@@ -201,24 +318,11 @@ entire integration — no rendering code changes required.
 
 ## What's NOT built yet (deferred phases)
 
-Phases 1 and 2 are done — silhouette, professional appearance, correct
-proportions, clean topology, size morphing, and a collision proxy (the first
-six items in the brief's own 10-item priority order). Not yet done from
-Phase 2's original scope: closing the `Product.gender`/`Mannequin.gender`
-plumbing gap (never threaded through `ProductExperience` → `GarmentViewer`
-today) — deferred to Phase 3 below, since it only matters once `GarmentViewer`
-needs to pick a mesh, and doing it in isolation now would have nothing to
-wire it to.
+Phases 1, 2, and 3 are done — silhouette, professional appearance, correct
+proportions, clean topology, size morphing, a collision proxy, and real
+skeletal animation with garments sharing the body's skeleton on the live PDP
+(the first seven items in the brief's own 10-item priority order).
 
-- **Phase 3**: closing the `Product.gender`/`Mannequin.gender` plumbing gap,
-  real skeletal animation clips, cutting `GarmentViewer` /
-  `product-experience` / `HeroMannequin` over to this engine (today only
-  `HeroMannequin.tsx` uses it — the PDP viewer still uses the old primitive
-  system, deliberately untouched to avoid regression risk), rebuilding
-  garments as their own lofted meshes sharing the body's skeleton (Three.js
-  supports multiple `SkinnedMesh` on one `Skeleton`), then deleting
-  `procedural/humanoid.ts`, `procedural/garment-builder.ts`,
-  `scene/MannequinFigure.tsx`, and `hooks/useAnimationController.ts`.
 - **Phase 4**: cloth simulation. No physics/cloth library exists in
   `package.json` — real-time solving needs a genuine dependency decision, and
   the schema already has a `SimulationAsset`/`CINEMATIC` precomputed-sequence
@@ -247,9 +351,8 @@ wire it to.
   ZBrush-retopologized fidelity (natural asymmetry, anatomical nuance) — that
   requires a real authored asset, which is exactly what the GLB loader path
   exists to accept later.
-- **Where the engine is actually wired in today**: the homepage hero
-  (`HeroMannequin.tsx`) and an internal admin QA route
-  (`/admin/3d-studio/mannequin-preview`). The customer-facing product page's
-  3D viewer (`GarmentViewer`) still runs the old primitive system — cutting
-  it over is Phase 3, once garments move to the same skeleton so nothing
-  visibly clips during the transition.
+- **Where the engine is wired in today**: the homepage hero
+  (`HeroMannequin.tsx`), an internal admin QA route
+  (`/admin/3d-studio/mannequin-preview`, now with garment/fit/color/animation
+  controls too), and the live product page's 3D viewer (`GarmentViewer`) —
+  the old primitive system no longer exists anywhere in the codebase.
