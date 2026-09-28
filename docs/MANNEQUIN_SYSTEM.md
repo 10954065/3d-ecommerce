@@ -256,6 +256,69 @@ roughness — the rest of that impression is a `LightingRig`/environment-
 lighting concern (softer/larger key light, or HDR environment lighting per
 the brief's section 15), not a material one, and is out of scope here.
 
+## Realistic (MakeHuman-style) proportions, not retail-mannequin proportions (Phase 4d)
+
+The original `FEMALE_PROPORTIONS`/`MALE_PROPORTIONS` tables in
+`geometry/body-chains.ts`, and the head-size constants in `buildTorsoChain`,
+were explicitly "tuned by eye against typical fashion-mannequin references"
+(see the Phase 1 comment they replaced). Rendered and inspected closely, that
+read as a stylized retail display form: a small, egg-sized head (jaw-to-crown
+span was only ~0.098 of total height, versus the ~1/7.5-1/8 "heads tall" ratio
+of a real adult) sitting on a corseted, wasp-waisted torso — the width
+multiplier gap between hip/chest and waist amplified the measurement's own
+circumference ratio rather than just reflecting it (e.g. a 73/99cm
+waist/hip measurement pair rendered as a 65%-width waist, not 74%). The male
+table had an even flatter problem: `waist.width` and `hip.width` were
+numerically identical (1.12/1.12), producing a literal rectangle torso with
+no taper at all.
+
+This was retuned toward MakeHuman's own stated design goal — a realistic,
+explicitly "not idealistic" (their Proportions slider's own wording),
+anthropometrically-grounded average adult, not an idealized fashion figure —
+without using any MakeHuman/MPFB2/SMPL-X code or assets (see the licensing
+note below); only public, factual anatomical proportion conventions and
+MakeHuman's own published design-philosophy docs informed the retuning:
+
+- **Head size**: `headRadius` raised from `height * 0.062` to `height * 0.078`,
+  and the jaw→cheek→crownBase→crownMid→crown Y-spacing constants scaled up
+  ~26% to match, bringing the jaw-to-crown span to ~0.124 of total height —
+  close to the classical ~7.5-8 heads-tall realistic adult ratio instead of
+  the ~10-heads-tall proportion a small head implies.
+- **Waist/hip/chest width multipliers**: brought much closer together for
+  both genders (female hip/waist/chest: 1.22/1.08/1.10 → 1.12/1.04/1.08; male:
+  1.12/1.12/1.18 → 1.08/1.00/1.16) so the rendered taper tracks each
+  measurement's own circumference ratio instead of amplifying it into a
+  corseted hourglass (female) or erasing it into a rectangle (male, which now
+  has a modest but real waist taper instead of no taper at all).
+- Gender differentiation is preserved (female still tapers more than male;
+  bust/hip volume differences are untouched) — only the *degree* of
+  exaggeration changed, not which gender reads as which.
+
+This is a proportion/shape retune only — it does not touch topology, ring
+density, or the existing chest-to-shoulder "shelf" transition (a known
+loft-smoothness limitation from the ring-loft technique itself, see
+"Parts meet by overlap" above), which reads slightly more visible now only
+because a narrower chest ring makes the true-shoulder-width ring above it a
+bigger jump; a small chest-width compensating bump (female +0.02, male +0.02)
+keeps that from getting materially worse without re-opening the corset issue.
+Verified via the admin preview (`/admin/3d-studio/mannequin-preview`, archetype
+"none") for both genders at M, and via the live PDP size selector (which feeds
+real per-size `MannequinMeasurements` straight into `buildMannequinGeometry`,
+unlike the admin preview's size dropdown which exercises the separate
+Phase 2 morph-blend path) at XS and XL — confirms the real customer-facing
+per-size path scales correctly at both proportion tables.
+
+**On "look like MakeHuman" and licensing**: MakeHuman's own mesh/rig assets
+(and MPFB2, its Blender-addon successor) are CC0-licensed and could in
+principle be dropped into the existing `MannequinSource = {kind:"gltf", url}`
+loader branch — but doing so requires actually authoring/exporting a GLB
+through Blender, which is not available in this environment. SMPL-X and the
+CLOTH3D dataset (also considered) are non-commercial-research-licensed and
+were ruled out entirely for a commercial site. This retune reproduces
+MakeHuman's *design philosophy* (realistic, non-idealized proportions) in our
+own procedural tables — it does not use, copy, or derive from any MakeHuman
+mesh data.
+
 ## Garments as lofted shells sharing the body's skeleton (Phase 3)
 
 `src/components/3d/mannequin/geometry/body-frame.ts` — `computeBodyFrame()`

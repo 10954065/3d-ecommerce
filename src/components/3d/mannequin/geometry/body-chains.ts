@@ -38,37 +38,46 @@ export interface GenderProportions {
   hipSocketInset: number;
 }
 
+/**
+ * Retuned for Phase 4d against MakeHuman's stated design philosophy (a
+ * realistic, "not idealistic," anthropometrically-grounded average adult —
+ * see docs/MANNEQUIN_SYSTEM.md) rather than the exaggerated retail-display
+ * mannequin proportions these tables originally carried: the width
+ * multipliers below are much closer together across hip/waist/chest than
+ * before, so the rendered taper tracks the measurement's own circumference
+ * ratio instead of amplifying it into a corseted hourglass.
+ */
 export const FEMALE_PROPORTIONS: GenderProportions = {
-  hip: { width: 1.22, depth: 0.86, n: 2.1 },
-  waist: { width: 1.08, depth: 0.78, n: 1.85 },
-  underbust: { width: 1.05, depth: 0.8, n: 1.95 },
-  chest: { width: 1.1, depth: 0.86, n: 2.05, frontBulge: 0.018 },
-  shoulderBase: { width: 1.0, depth: 0.82, n: 2.15 },
+  hip: { width: 1.12, depth: 0.88, n: 2.1 },
+  waist: { width: 1.04, depth: 0.85, n: 1.9 },
+  underbust: { width: 1.02, depth: 0.86, n: 1.95 },
+  chest: { width: 1.08, depth: 0.9, n: 2.05, frontBulge: 0.014 },
+  shoulderBase: { width: 1.0, depth: 0.86, n: 2.15 },
   neck: { width: 0.92, depth: 0.86, n: 2.0 },
   headWidthFactor: 0.92,
   headDepthFactor: 0.98,
   headN: 2.3,
   jawWidthFactor: 0.78,
-  armVolume: 0.9,
-  legVolume: 0.95,
+  armVolume: 0.92,
+  legVolume: 0.96,
   handScale: 0.92,
   footScale: 0.93,
   hipSocketInset: 0.55,
 };
 
 export const MALE_PROPORTIONS: GenderProportions = {
-  hip: { width: 1.12, depth: 0.92, n: 2.2 },
-  waist: { width: 1.12, depth: 0.9, n: 2.05 },
-  underbust: { width: 1.13, depth: 0.92, n: 2.1 },
-  chest: { width: 1.18, depth: 0.95, n: 2.25, frontBulge: 0.006 },
-  shoulderBase: { width: 1.0, depth: 0.88, n: 2.3 },
+  hip: { width: 1.08, depth: 0.92, n: 2.2 },
+  waist: { width: 1.0, depth: 0.92, n: 2.05 },
+  underbust: { width: 1.06, depth: 0.94, n: 2.1 },
+  chest: { width: 1.16, depth: 0.97, n: 2.2, frontBulge: 0.005 },
+  shoulderBase: { width: 1.0, depth: 0.9, n: 2.25 },
   neck: { width: 1.0, depth: 0.94, n: 2.1 },
   headWidthFactor: 1.0,
   headDepthFactor: 1.02,
   headN: 2.5,
   jawWidthFactor: 0.86,
-  armVolume: 1.15,
-  legVolume: 1.1,
+  armVolume: 1.12,
+  legVolume: 1.08,
   handScale: 1.08,
   footScale: 1.08,
   hipSocketInset: 0.62,
@@ -106,7 +115,11 @@ export function buildTorsoChain(
   const waistR = effR(m.waistCm);
   const chestR = effR(m.chestCm);
   const neckR = effR(m.neckCm);
-  const headRadius = height * 0.062;
+  // headRadius/jaw-to-crown spacing target a realistic ~1/7.7 heads-tall
+  // adult figure (chin-to-crown span below works out to ~0.124*height) per
+  // MakeHuman's own "not idealistic" anthropometric design goal, replacing
+  // the smaller, fashion-illustration-proportioned head this used to have.
+  const headRadius = height * 0.078;
   const shoulderHalfWidth = m.shoulderWidthCm / 100 / 2;
 
   const pelvisBottomY = hipY;
@@ -117,11 +130,11 @@ export function buildTorsoChain(
   const shoulderY = chestY + height * 0.045 * torsoLengthScale;
   const neckBaseY = shoulderY + height * 0.012;
   const neckTopY = neckBaseY + height * 0.035;
-  const jawY = neckTopY + height * 0.02;
-  const cheekY = jawY + height * 0.034;
-  const crownBaseY = cheekY + height * 0.03;
-  const crownMidY = crownBaseY + height * 0.02;
-  const crownY = crownMidY + height * 0.014;
+  const jawY = neckTopY + height * 0.023;
+  const cheekY = jawY + height * 0.043;
+  const crownBaseY = cheekY + height * 0.038;
+  const crownMidY = crownBaseY + height * 0.025;
+  const crownY = crownMidY + height * 0.018;
 
   // The torso's own shoulder ring is brought nearly out to the true
   // shoulderWidthCm socket point (rather than staying chest-width) so the
