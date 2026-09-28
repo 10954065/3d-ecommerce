@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { buildFingerChain, buildFootChain, FINGER_LAYOUT } from "./geometry/body-chains";
+import { buildEarChain, buildEyelidChain, buildFingerChain, buildFootChain, FINGER_LAYOUT } from "./geometry/body-chains";
 import { armBreakpoints, computeBodyFrame, legBreakpoints, torsoBreakpoints, type MannequinMorphOverrides } from "./geometry/body-frame";
 import { buildPart, concatParts, localToWorld, yOf, type BoneBreakpoint } from "./geometry/skinned-loft";
 import { FINGER_RADIAL_SEGMENTS, FINGER_RINGS_PER_SEGMENT, RADIAL_SEGMENTS, RINGS_PER_SEGMENT } from "./mannequinConfig";
@@ -53,6 +53,47 @@ export function buildMannequinGeometry(
       anchorLocalY: 0,
     }),
   ];
+
+  // Minimal facial structure: ears and closed-eyelid ridges, positioned by
+  // interpolating between the jaw and cheek landmarks already used for the
+  // head's own silhouette (see buildEarChain/buildEyelidChain for why these
+  // are separate small lofts rather than an indentation in the head loft).
+  const jawLandmark = torso.landmarks.find((l) => l.name === "jaw")!;
+  const cheekLandmark = torso.landmarks.find((l) => l.name === "cheek")!;
+  const lerpFace = (a: number, b: number, t: number) => a + (b - a) * t;
+
+  (["L", "R"] as const).forEach((sideLabel) => {
+    const side = sideLabel === "L" ? -1 : 1;
+
+    const earT = 0.5;
+    const earY = lerpFace(jawLandmark.y, cheekLandmark.y, earT);
+    const earHalfWidth = lerpFace(jawLandmark.halfWidth, cheekLandmark.halfWidth, earT);
+    const earSocket = new THREE.Vector3(side * earHalfWidth * 0.95, earY, -earHalfWidth * 0.08);
+    const earDir = new THREE.Vector3(side, -0.2, -0.35).normalize();
+    const earLandmarks = buildEarChain(frame.torso.headRadius);
+    parts.push(
+      buildPart(earLandmarks, [{ bone: "Head", localY: 0 }], { radialSegments: FINGER_RADIAL_SEGMENTS, ringsPerSegment: FINGER_RINGS_PER_SEGMENT }, {
+        origin: earSocket,
+        direction: earDir,
+        anchorLocalY: 0,
+      }),
+    );
+
+    const eyeT = 0.82;
+    const eyeY = lerpFace(jawLandmark.y, cheekLandmark.y, eyeT);
+    const eyeHalfWidth = lerpFace(jawLandmark.halfWidth, cheekLandmark.halfWidth, eyeT);
+    const eyeDepthFront = lerpFace(jawLandmark.depthFront, cheekLandmark.depthFront, eyeT);
+    const eyeSocket = new THREE.Vector3(side * eyeHalfWidth * 0.42, eyeY, eyeDepthFront * 0.9);
+    const eyeDir = new THREE.Vector3(0, -0.12, 1).normalize();
+    const eyelidLandmarks = buildEyelidChain(frame.torso.headRadius);
+    parts.push(
+      buildPart(eyelidLandmarks, [{ bone: "Head", localY: 0 }], { radialSegments: FINGER_RADIAL_SEGMENTS, ringsPerSegment: FINGER_RINGS_PER_SEGMENT }, {
+        origin: eyeSocket,
+        direction: eyeDir,
+        anchorLocalY: 0,
+      }),
+    );
+  });
 
   (["L", "R"] as const).forEach((sideLabel) => {
     const side = sideLabel === "L" ? -1 : 1;

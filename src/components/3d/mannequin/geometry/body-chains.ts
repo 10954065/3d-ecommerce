@@ -119,8 +119,9 @@ export function buildTorsoChain(
   const neckTopY = neckBaseY + height * 0.035;
   const jawY = neckTopY + height * 0.02;
   const cheekY = jawY + height * 0.034;
-  const crownBaseY = cheekY + height * 0.036;
-  const crownY = crownBaseY + height * 0.022;
+  const crownBaseY = cheekY + height * 0.03;
+  const crownMidY = crownBaseY + height * 0.02;
+  const crownY = crownMidY + height * 0.014;
 
   // The torso's own shoulder ring is brought nearly out to the true
   // shoulderWidthCm socket point (rather than staying chest-width) so the
@@ -143,9 +144,10 @@ export function buildTorsoChain(
     { name: "shoulderBase", y: shoulderY, halfWidth: shoulderRingHalfWidth, depthFront: chestR * p.shoulderBase.depth, depthBack: chestR * p.shoulderBase.depth * 0.9, n: p.shoulderBase.n },
     { name: "neckBase", y: neckBaseY, halfWidth: neckR * p.neck.width * 1.15, depthFront: neckR * p.neck.depth * 1.15, depthBack: neckR * p.neck.depth * 1.05, n: p.neck.n },
     { name: "neckTop", y: neckTopY, halfWidth: neckR * p.neck.width, depthFront: neckR * p.neck.depth, depthBack: neckR * p.neck.depth * 0.94, n: p.neck.n },
-    { name: "jaw", y: jawY, halfWidth: headRadius * p.jawWidthFactor, depthFront: headRadius * p.jawWidthFactor * 0.95, depthBack: headRadius * p.jawWidthFactor * 0.85, n: 2.1 },
+    { name: "jaw", y: jawY, halfWidth: headRadius * p.jawWidthFactor, depthFront: headRadius * p.jawWidthFactor * 0.95, depthBack: headRadius * p.jawWidthFactor * 0.85, n: 1.85 },
     { name: "cheek", y: cheekY, halfWidth: headRadius * p.headWidthFactor, depthFront: headRadius * p.headDepthFactor * 0.62, depthBack: headRadius * p.headDepthFactor * 0.54, n: p.headN },
-    { name: "crownBase", y: crownBaseY, halfWidth: headRadius * p.headWidthFactor * 0.55, depthFront: headRadius * p.headDepthFactor * 0.4, depthBack: headRadius * p.headDepthFactor * 0.36, n: p.headN },
+    { name: "crownBase", y: crownBaseY, halfWidth: headRadius * p.headWidthFactor * 0.82, depthFront: headRadius * p.headDepthFactor * 0.58, depthBack: headRadius * p.headDepthFactor * 0.52, n: p.headN },
+    { name: "crownMid", y: crownMidY, halfWidth: headRadius * p.headWidthFactor * 0.5, depthFront: headRadius * p.headDepthFactor * 0.36, depthBack: headRadius * p.headDepthFactor * 0.32, n: p.headN },
     { name: "crown", y: crownY, halfWidth: 0.001, depthFront: 0.001, depthBack: 0.001, n: 2 },
   ];
 
@@ -240,6 +242,43 @@ export function buildLegChain(m: MannequinMeasurements, p: GenderProportions): L
   ];
 
   return { landmarks, totalLength: legLength, ankleY: 0 };
+}
+
+/**
+ * A small flattened, tapered appendage lofted outward from the side of the
+ * head — same "separate small loft, embedded by overlap" technique as
+ * buildFingerChain, not a socket/indentation (ring-loft can't carve a local
+ * concavity into an otherwise-convex head silhouette). Local Y is the
+ * outward protrusion axis; the caller (computeBodyFrame) orients it roughly
+ * lateral-and-back from the head surface.
+ */
+export function buildEarChain(headRadius: number): BodyLandmark[] {
+  const scale = headRadius * 0.32;
+  return [
+    { name: "earBase", y: -0.002, halfWidth: scale * 0.4, depthFront: scale * 0.26, depthBack: scale * 0.22, n: 2.3 },
+    { name: "earMid", y: scale * 0.45, halfWidth: scale * 0.46, depthFront: scale * 0.2, depthBack: scale * 0.18, n: 2.2 },
+    { name: "earUpper", y: scale * 0.78, halfWidth: scale * 0.24, depthFront: scale * 0.1, depthBack: scale * 0.09, n: 2.4 },
+    { name: "earTip", y: scale * 0.95, halfWidth: scale * 0.04, depthFront: 0.001, depthBack: 0.001, n: 2 },
+  ];
+}
+
+/**
+ * A minimal closed-eyelid ridge — a very shallow, wide, flat bump (not an
+ * open eye with a visible iris), per the brief's "closed or minimally
+ * detailed eyes" — deliberately subtle to stay on the "neutral, non-
+ * distracting" side rather than reading as a character face. Local Y is the
+ * shallow forward-protrusion axis (a few millimeters); halfWidth/depth give
+ * the almond's world-horizontal/vertical extent once rotated to face
+ * forward — see computeBodyFrame's eye socket placement.
+ */
+export function buildEyelidChain(headRadius: number): BodyLandmark[] {
+  const width = headRadius * 0.22;
+  const height = headRadius * 0.075;
+  return [
+    { name: "lidBase", y: -0.0015, halfWidth: width * 0.85, depthFront: height * 0.8, depthBack: height * 0.8, n: 2.6 },
+    { name: "lidPeak", y: 0.0015, halfWidth: width, depthFront: height, depthBack: height, n: 3 },
+    { name: "lidTip", y: 0.003, halfWidth: width * 0.06, depthFront: 0.0008, depthBack: 0.0008, n: 2 },
+  ];
 }
 
 export interface FootChainResult {

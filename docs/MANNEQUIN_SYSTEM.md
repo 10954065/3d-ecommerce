@@ -182,6 +182,40 @@ wireframe overlay behind `Mannequin`'s `showCollisionDebug` prop (QA-only, off
 by default) — not consumed by anything yet, since there's no cloth
 simulation until Phase 4.
 
+## Minimal facial structure (Phase 4)
+
+Following an explicit updated request for "closed or minimally detailed eyes,
+natural ears, clean jawline" (superseding Phase 1's fully faceless head for
+this one point), added:
+
+- **Ears** — `buildEarChain()` in `geometry/body-chains.ts`, a small flattened
+  tapered appendage using the same "separate small loft, embedded by overlap"
+  technique as fingers (ring-loft can't carve a lateral protrusion out of an
+  otherwise-convex head silhouette — it only varies cross-section per Y).
+  Placed and oriented in `MannequinBuilder.ts` by interpolating between the
+  `jaw`/`cheek` head landmarks, skinned rigidly to `Head`.
+- **Closed eyelids** — `buildEyelidChain()`, an intentionally tiny, shallow
+  almond-shaped ridge (no iris, no open eye) — same overlap technique,
+  positioned near the `cheek` landmark's front surface. Kept deliberately
+  subtle: the brief's own section 19 warns against reading as a "generic 3D
+  avatar," and a faceless *silhouette* with the faintest suggestion of closed
+  eyes is a very different thing from an expressive character face.
+- **Jawline** — no new geometry; tuned the existing `jaw` landmark's
+  superellipse exponent (2.1 → 1.85) for a more defined edge.
+
+**Fixed as part of this pass**: the head's crown had the same "wide-to-a-point
+in one segment" problem as the first ear draft — a visible cone/spike at the
+top, from `crownBase` (55% head width) tapering straight to the `crown` pinch
+point over a short span. Widened `crownBase` and added an intermediate
+`crownMid` landmark so the taper happens over two gentler steps, producing a
+smooth dome instead of a spike. This was visible only on close zoom (normal
+product-viewing distance hid it) but is a real, now-fixed defect, not new
+regression risk introduced by the facial-feature work.
+
+All of this only touches the already-tiny top slice of the torso/head loft
+(`jaw`/`cheek`/`crownBase`/`crown` landmarks) — body proportions, skin
+weights, and everything below the neck are unaffected.
+
 ## Garments as lofted shells sharing the body's skeleton (Phase 3)
 
 `src/components/3d/mannequin/geometry/body-frame.ts` — `computeBodyFrame()`
