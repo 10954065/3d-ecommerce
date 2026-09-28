@@ -216,6 +216,34 @@ All of this only touches the already-tiny top slice of the torso/head loft
 (`jaw`/`cheek`/`crownBase`/`crown` landmarks) — body proportions, skin
 weights, and everything below the neck are unaffected.
 
+## Wrinkles and per-fabric creasing (Phase 4b)
+
+`src/components/3d/materials/fabric-material.ts` layers a second effect on
+top of the existing global sway/billow: a **joint-proximity crease**, using
+the garment geometry's own `skinWeight` attribute as a free "how close to a
+joint" signal — where a vertex's weight is blended roughly 50/50 between two
+bones (elbow, knee, waist, shoulder transition), `jointBlend` peaks, and a
+small sine-based ripple pushes along the vertex normal there. Scaled mostly
+by `uActivity` (the same per-frame value `MannequinAnimation.ts` already
+drives from the active clip) so creases stay subtle at rest and intensify
+during motion — approximating "wrinkles depend on pose" without needing an
+actual bend-angle input. `creaseAmplitudeFor()`/`creaseFrequencyFor()` derive
+per-fabric differentiation from `FabricPhysicalProps`: higher
+`bendingResistance` (denim) → fewer, deeper creases; `drape: "high"` (silk) →
+softer, more numerous shallow ones; higher `stretchResistance` (sportswear)
+dampens creasing overall, per the brief's own fabric-behavior descriptions.
+
+**Bug found and fixed while building this**: the pre-existing sway/billow
+term's activity multiplier (`1 + uActivity * 3`) let peak-motion displacement
+reach ~3cm for a medium-drape fabric — comparable to or larger than the
+garment shell's own fit-ease clearance over the body (a few millimeters to
+~1cm). At `FABRIC_TEST`'s activity level this visibly tore the garment
+surface into a jagged z-fighting pattern against the body underneath.
+Retuned to `1 + uActivity * 0.9`, and kept the new crease amplitude
+sub-millimeter-to-~1.5mm specifically to stay well inside that clearance.
+Verified fixed by re-rendering `FABRIC_TEST` (the clip that exercises this
+worst-case) before committing.
+
 ## Garments as lofted shells sharing the body's skeleton (Phase 3)
 
 `src/components/3d/mannequin/geometry/body-frame.ts` — `computeBodyFrame()`
