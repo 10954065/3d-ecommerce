@@ -78,8 +78,11 @@ export function createFabricMaterial(
 
   const material = new THREE.MeshStandardMaterial({
     color: colorHex,
-    roughness: 0.35 + fabric.stiffness * 0.5,
-    metalness: fabric.massGsm > 450 ? 0.08 : 0.0,
+    // Floor raised from 0.35 -> 0.48: dark garments under a bright studio
+    // key light were reading as glossy plastic at the old baseline — real
+    // woven fabric (even sleek silk) reflects far softer than that.
+    roughness: 0.48 + fabric.stiffness * 0.42,
+    metalness: fabric.massGsm > 450 ? 0.05 : 0.0,
   });
 
   material.onBeforeCompile = (shader) => {

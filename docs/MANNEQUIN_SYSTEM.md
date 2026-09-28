@@ -244,6 +244,18 @@ sub-millimeter-to-~1.5mm specifically to stay well inside that clearance.
 Verified fixed by re-rendering `FABRIC_TEST` (the clip that exercises this
 worst-case) before committing.
 
+## Matte fabric material floor (Phase 4c)
+
+Raised the fabric material's roughness floor from 0.35 to 0.48 (and dropped
+heavy-fabric metalness from 0.08 to 0.05) — dark garments under the STUDIO
+lighting preset's single strong key light were reading closer to glossy
+plastic than woven fabric. Note this only partially addresses the "glossy"
+impression: a smooth, continuous, un-normal-mapped surface under one hard
+directional light will always throw a broad specular highlight regardless of
+roughness — the rest of that impression is a `LightingRig`/environment-
+lighting concern (softer/larger key light, or HDR environment lighting per
+the brief's section 15), not a material one, and is out of scope here.
+
 ## Garments as lofted shells sharing the body's skeleton (Phase 3)
 
 `src/components/3d/mannequin/geometry/body-frame.ts` — `computeBodyFrame()`
